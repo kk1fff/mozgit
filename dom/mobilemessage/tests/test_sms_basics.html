@@ -24,7 +24,7 @@ function checkSmsDisabled() {
 
 function checkSmsEnabled() {
   // Bug 784617: WebSms is disabled on all platforms except Android for the moment.
-  if (navigator.appVersion.indexOf("Android") == -1 && SpecialPowers.Services.appinfo.name != "B2G") {
+  if (navigator.appVersion.indexOf("Android") == -1 && SpecialPowers.Services.appinfo.widgetToolkit != "gonk") {
     checkSmsDisabled();
     return;
   }

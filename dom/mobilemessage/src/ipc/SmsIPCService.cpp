@@ -111,6 +111,11 @@ SmsIPCService::SmsIPCService()
   Preferences::AddStrongObservers(this, kObservedPrefs);
   mMmsDefaultServiceId = getDefaultServiceId(kPrefMmsDefaultServiceId);
   mSmsDefaultServiceId = getDefaultServiceId(kPrefSmsDefaultServiceId);
+
+  // Construct the Sms{Parent,Child} when initializing the IPC service so
+  // we can handle the unsolicited events without calling any functions to
+  // establish the IPC tunnel first.
+  GetSmsChild();
 }
 
 /*

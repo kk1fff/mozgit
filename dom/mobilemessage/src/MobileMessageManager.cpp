@@ -67,15 +67,20 @@ NS_IMPL_EVENT_HANDLER(MobileMessageManager, deliveryerror)
 NS_IMPL_EVENT_HANDLER(MobileMessageManager, readsuccess)
 NS_IMPL_EVENT_HANDLER(MobileMessageManager, readerror)
 
-void
+bool
 MobileMessageManager::Init(nsPIDOMWindow *aWindow)
 {
   BindToOwner(aWindow);
 
+  nsCOMPtr<nsIMmsService> mmsService = do_GetService(MMS_SERVICE_CONTRACTID);
+  NS_ENSURE_TRUE(mmsService, false);
+  nsCOMPtr<nsISmsService> smsService = do_GetService(SMS_SERVICE_CONTRACTID);
+  NS_ENSURE_TRUE(smsService, false);
+
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
   // GetObserverService() can return null is some situations like shutdown.
   if (!obs) {
-    return;
+    return false;
   }
 
   obs->AddObserver(this, kSmsReceivedObserverTopic, false);
@@ -87,6 +92,7 @@ MobileMessageManager::Init(nsPIDOMWindow *aWindow)
   obs->AddObserver(this, kSmsDeliveryErrorObserverTopic, false);
   obs->AddObserver(this, kSmsReadSuccessObserverTopic, false);
   obs->AddObserver(this, kSmsReadErrorObserverTopic, false);
+  return true;
 }
 
 void

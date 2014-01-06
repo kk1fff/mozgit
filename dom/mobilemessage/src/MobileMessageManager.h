@@ -27,7 +27,7 @@ public:
 
   NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
 
-  void Init(nsPIDOMWindow *aWindow);
+  bool Init(nsPIDOMWindow *aWindow);
   void Shutdown();
 
 private:
