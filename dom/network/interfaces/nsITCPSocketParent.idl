@@ -6,13 +6,14 @@
 
 interface nsIDOMTCPSocket;
 interface nsIDOMTCPServerSocket;
+interface nsISocketTransport;
 interface nsITCPServerSocketParent;
 interface nsITCPSocketIntermediary;
 
 // Interface required to allow the TCP socket object (TCPSocket.js) in the
 // parent process to talk to the parent IPC actor, TCPSocketParent, which
 // is written in C++.
-[scriptable, uuid(6f040bf0-6852-11e3-949a-0800200c9a66)]
+[scriptable, uuid(c434224a-dbb7-4869-8b2b-e49cee990e85)]
 interface nsITCPSocketParent : nsISupports
 {
   [implicit_jscontext] void initJS(in jsval intermediary);
@@ -65,7 +66,7 @@ interface nsITCPSocketParent : nsISupports
 // This interface is the bridge of TCPSocketParent, which is written in C++,
 // and TCPSocket, which is written in Javascript. TCPSocketParentIntermediary
 // implements nsITCPSocketIntermediary in Javascript.
-[scriptable, uuid(c434224a-dbb7-4869-8b2b-e49cee990e85)]
+[scriptable, uuid(861071ed-9ae4-4f35-b210-7da8f5aaee9e)]
 interface nsITCPSocketIntermediary : nsISupports {
   // Open the connection to the server with the given parameters
   nsIDOMTCPSocket open(in nsITCPSocketParent parent,
@@ -83,4 +84,15 @@ interface nsITCPSocketIntermediary : nsISupports {
 
   // Called when received a child request to send an array buffer.
   void onRecvSendArrayBuffer(in jsval data, in uint32_t trackingNumber);
+
+  // Connect existing socket transport to the TCPSocket object.
+  // @param socketTransport
+  //        The socket transport object that will back the TCPSocket.
+  nsIDOMTCPSocket openWithExistSocketTransport(in nsITCPSocketParent parent,
+                                               in AUTF8String host,
+                                               in unsigned short port,
+                                               in nsISocketTransport socketTransport,
+                                               in boolean useSSL,
+                                               in AUTF8String binaryType,
+                                               in unsigned long appId);
 };

@@ -108,6 +108,23 @@ TCPSocketChild::SendOpen(nsITCPSocketInternal* aSocket,
   return NS_OK;
 }
 
+NS_IMETHODIMP
+TCPSocketChild::SendWindowlessOpenBind(nsITCPSocketInternal* aSocket,
+                                       const nsACString& aRemoteHost, uint16_t aRemotePort,
+                                       const nsACString& aLocalHost, uint16_t aLocalPort,
+                                       bool aUseSSL)
+{
+  mSocket = aSocket;
+  AddIPDLReference();
+  gNeckoChild->SendPTCPSocketConstructor(this,
+                                         NS_ConvertUTF8toUTF16(aRemoteHost),
+                                         aRemotePort);
+  PTCPSocketChild::SendOpenBind(nsCString(aRemoteHost), aRemotePort,
+                                nsCString(aLocalHost), aLocalPort,
+                                aUseSSL, NS_LITERAL_CSTRING("arraybuffer"));
+  return NS_OK;
+}
+
 void
 TCPSocketChildBase::ReleaseIPDLReference()
 {
@@ -158,13 +175,22 @@ TCPSocketChild::RecvCallback(const nsString& aType,
     const SendableData& data = aData.get_SendableData();
 
     if (data.type() == SendableData::TArrayOfuint8_t) {
-      JSContext* cx = nsContentUtils::GetSafeJSContext();
-      JSAutoRequest ar(cx);
-      JS::Rooted<JS::Value> val(cx);
-      JS::Rooted<JSObject*> window(cx, mWindowObj);
-      bool ok = IPC::DeserializeArrayBuffer(window, data.get_ArrayOfuint8_t(), &val);
-      NS_ENSURE_TRUE(ok, true);
-      rv = mSocket->CallListenerArrayBuffer(aType, val);
+      // See if we can pass array directly.
+      nsCOMPtr<nsITCPSocketInternalNative> nativeSocket = do_QueryInterface(mSocket);
+      if (nativeSocket) {
+        const InfallibleTArray<uint8_t>& buffer = data.get_ArrayOfuint8_t();
+        rv = nativeSocket->CallListenerNativeArray(const_cast<uint8_t*>(buffer.Elements()),
+                                                   buffer.Length());
+
+      } else {
+        JSContext* cx = nsContentUtils::GetSafeJSContext();
+        JSAutoRequest ar(cx);
+        JS::Rooted<JS::Value> val(cx);
+        JS::Rooted<JSObject*> window(cx, mWindowObj);
+        bool ok = IPC::DeserializeArrayBuffer(window, data.get_ArrayOfuint8_t(), &val);
+        NS_ENSURE_TRUE(ok, true);
+        rv = mSocket->CallListenerArrayBuffer(aType, val);
+      }
 
     } else if (data.type() == SendableData::TnsString) {
       rv = mSocket->CallListenerData(aType, data.get_nsString());
@@ -243,6 +269,13 @@ TCPSocketChild::SendSend(JS::Handle<JS::Value> aData,
     arr.SwapElements(fallibleArr);
     SendData(arr, aTrackingNumber);
   }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TCPSocketChild::SendSendArray(nsTArray<uint8_t> *aArr, uint32_t aTrackingNumber)
+{
+  SendData(*aArr, aTrackingNumber);
   return NS_OK;
 }
 

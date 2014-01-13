@@ -15,6 +15,8 @@
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/HoldDropJSObjects.h"
+#include "nsISocketTransportService.h"
+#include "nsISocketTransport.h"
 #include "nsIScriptSecurityManager.h"
 
 namespace IPC {
@@ -192,6 +194,64 @@ TCPSocketParent::InitJS(JS::Handle<JS::Value> aIntermediary, JSContext* aCx)
   MOZ_ASSERT(aIntermediary.isObject());
   mIntermediaryObj = &aIntermediary.toObject();
   return NS_OK;
+}
+
+bool
+TCPSocketParent::RecvOpenBind(const nsCString& aRemoteHost,
+                              const uint16_t& aRemotePort,
+                              const nsCString& aLocalAddr,
+                              const uint16_t& aLocalPort,
+                              const bool&     aUseSSL,
+                              const nsCString& aBinaryType)
+{
+  if (net::UsingNeckoIPCSecurity() &&
+      !AssertAppProcessPermission(Manager()->Manager(), "tcp-socket")) {
+    FireInteralError(this, __LINE__);
+    return true;
+  }
+
+  nsresult rv;
+  nsCOMPtr<nsISocketTransportService> sts =
+    do_GetService("@mozilla.org/network/socket-transport-service;1", &rv);
+  NS_ENSURE_SUCCESS(rv, true);
+
+  nsCOMPtr<nsISocketTransport> socketTransport;
+  rv = sts->CreateTransport(nullptr, 0,
+                            aRemoteHost, aRemotePort,
+                            nullptr, getter_AddRefs(socketTransport));
+  NS_ENSURE_SUCCESS(rv, true);
+
+  PRNetAddr prAddr;
+  PR_InitializeNetAddr(PR_IpAddrAny, aLocalPort, &prAddr);
+  PRStatus status = PR_StringToNetAddr(aLocalAddr.BeginReading(), &prAddr);
+  if (status != PR_SUCCESS) {
+    return true;
+  }
+
+  mozilla::net::NetAddr addr;
+  PRNetAddrToNetAddr(&prAddr, &addr);
+  socketTransport->Bind(&addr);
+
+  // Obtain App ID
+  uint32_t appId = nsIScriptSecurityManager::NO_APP_ID;
+  const PContentParent *content = Manager()->Manager();
+  const InfallibleTArray<PBrowserParent*>& browsers = content->ManagedPBrowserParent();
+  if (browsers.Length() > 0) {
+    TabParent *tab = static_cast<TabParent*>(browsers[0]);
+    appId = tab->OwnAppId();
+  }
+
+  mIntermediary = do_CreateInstance("@mozilla.org/tcp-socket-intermediary;1", &rv);
+  if (NS_FAILED(rv)) {
+    FireInteralError(this, __LINE__);
+    return true;
+  }
+
+  mIntermediary->OpenWithExistSocketTransport(this, aRemoteHost, aRemotePort,
+                                              socketTransport,
+                                              aUseSSL, aBinaryType, appId,
+                                              getter_AddRefs(mSocket));
+  return true;
 }
 
 bool
