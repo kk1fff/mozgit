@@ -56,6 +56,26 @@ TCPSocketParentIntermediary.prototype = {
     return socket;
   },
 
+  openWithExistSocketTransport: function(host, port, socketTransport, binaryType) {
+    let baseSocket = Cc["@mozilla.org/tcp-socket;1"].createInstance(Ci.nsIDOMTCPSocket);
+    let socket = baseSocket.openWithExistSocketTransport(aHost, aPort, binaryType);
+    if (!socket)
+      return null;
+
+    let socketInternal = socket.QueryInterface(Ci.nsITCPSocketInternal);
+    if (socketInternal) {
+      socketInternal.setAppId(aAppId);
+    }
+
+    // Handle parent's request to update buffered amount.
+    socketInternal.setOnUpdateBufferedAmountHandler(
+      this._onUpdateBufferedAmountHandler.bind(this, aParentSide));
+
+    // Handlers are set to the JS-implemented socket object on the parent side.
+    this._setCallbacks(aParentSide, socket);
+    return socket;
+  },
+
   listen: function(aTCPServerSocketParent, aLocalPort, aBacklog, aBinaryType) {
     let baseSocket = Cc["@mozilla.org/tcp-socket;1"].createInstance(Ci.nsIDOMTCPSocket);
     let serverSocket = baseSocket.listen(aLocalPort, { binaryType: aBinaryType }, aBacklog);

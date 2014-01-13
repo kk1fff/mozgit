@@ -6,6 +6,11 @@
 
 interface nsITCPSocketInternal;
 interface nsIDOMWindow;
+%{C++
+#include "nsTArray.h"
+%}
+
+[ptr] native ByteArray(nsTArray<uint8_t>);
 
 // Interface to allow the content process socket to reach the IPC bridge.
 // Implemented in C++ as TCPSocketChild, referenced as _socketBridge in TCPSocket.js
@@ -22,6 +27,16 @@ interface nsITCPSocketChild : nsISupports
   [implicit_jscontext] 
   void sendSend(in jsval data, in unsigned long byteOffset,
                 in unsigned long byteLength, in unsigned long trackingNumber);
+
+  [noscript]
+  void sendSendArray(in ByteArray arr,
+                     in unsigned long trackingNumber);
+
+  [noscript]
+  void sendWindowlessOpenBind(in nsITCPSocketInternal socket,
+                              in AUTF8String remoteHost, in unsigned short remotePort,
+                              in AUTF8String localHost, in unsigned short localPort,
+                              in boolean ssl);
 
   // Tell the chrome process to perform equivalent operations to all following methods
   void sendResume();
