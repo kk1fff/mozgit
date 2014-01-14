@@ -106,6 +106,8 @@ nrappkit copyright:
 #include "nsXPCOM.h"
 #include "nsXULAppAPI.h"
 #include "runnable_utils.h"
+#include "mozilla/SyncRunnable.h"
+#include "nsTArray.h"
 
 extern "C" {
 #include "nr_api.h"
@@ -839,12 +841,6 @@ int NrSocketIpc::create(nr_transport_addr *addr) {
     ABORT(R_INTERNAL);
   }
 
-  // Bug 950660: Remote TCP socket is not supported yet.
-  if (NS_WARN_IF(addr->protocol != IPPROTO_UDP)) {
-    MOZ_ASSERT(false, "NrSocket over TCP is not e10s ready, see Bug 950660");
-    ABORT(R_INTERNAL);
-  }
-
   sts_thread_ = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
   if (NS_FAILED(rv)) {
     MOZ_ASSERT(false, "Failed to get STS thread");
@@ -1073,6 +1069,365 @@ void NrSocketIpc::recv_callback_s(RefPtr<nr_udp_message> msg) {
   }
 }
 
+// TCPSocket.
+NS_IMPL_ISUPPORTS(NrTcpSocketIpc,
+                  nsITCPSocketInternal,
+                  nsITCPSocketInternalNative)
+
+NrTcpSocketIpc::NrTcpSocketIpc(const nsCOMPtr<nsIEventTarget> &main_thread)
+: err_(false),
+  state_(NR_INIT),
+  main_thread_(main_thread),
+  monitor_("NrTcpSocketIpc"),
+  sent_byte_(0) {
+}
+
+//
+// nsITCPSocketInternal methods
+//
+NS_IMETHODIMP NrTcpSocketIpc::UpdateReadyState(const nsAString &readyState) {
+  NrSocketIpcState next_state = NR_INIT;
+
+  if (readyState.EqualsLiteral("open")) {
+    next_state = NR_CONNECTED;
+  } else if (readyState.EqualsLiteral("error")) {
+    next_state = NR_ERROR;
+  } else if (readyState.EqualsLiteral("close")) {
+    next_state = NR_CLOSED;
+  } else {
+    r_log(LOG_GENERIC, LOG_INFO,
+          "Not handling state changing to %s from TCPSocketChild",
+          NS_ConvertUTF16toUTF8(readyState).get());
+    return NS_OK;
+  }
+
+  RUN_ON_THREAD(sts_thread_,
+                mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                             &NrTcpSocketIpc::update_state_s,
+                             next_state),
+                false);
+  return NS_OK;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::UpdateBufferedAmount(uint32_t bufferedAmount,
+                                                   uint32_t trackingNumber) {
+  if (trackingNumber == tracking_number_) {
+    sent_byte_ = bufferedAmount;
+
+    RUN_ON_THREAD(sts_thread_,
+                  mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                                        &NrTcpSocketIpc::message_sent_s),
+                  NS_DISPATCH_NORMAL);
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CallListenerNativeArray(uint8_t *buf, uint32_t len) {
+  // Called when we received data.
+
+  nsAutoPtr<DataBuffer> data_buf(new DataBuffer(buf, len));
+  nsRefPtr<nr_tcp_message> msg = new nr_tcp_message(data_buf);
+
+  RUN_ON_THREAD(sts_thread_,
+                mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                                      &NrTcpSocketIpc::recv_message_s,
+                                      msg),
+                NS_DISPATCH_NORMAL);
+  return NS_OK;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CallListenerError(const nsAString &type,
+                                                const nsAString &name) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+// methods of nsITCPSocketInternal that we are not going to implement.
+
+NS_IMETHODIMP NrTcpSocketIpc::CallListenerArrayBuffer(const nsAString &type,
+                                                      const JS::HandleValue data) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CallListenerData(const nsAString &type,
+                                               const nsAString &data) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CallListenerVoid(const nsAString &type) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CreateAcceptedParent(nsISocketTransport *transport,
+                                                   const nsAString &binaryType,
+                                                   nsIDOMTCPSocket **retval) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CreateAcceptedChild(nsITCPSocketChild *socketChild,
+                                                  const nsAString &binaryType,
+                                                  nsIDOMWindow *window,
+                                                  nsIDOMTCPSocket **retval) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::SetAppId(uint32_t appId) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::SetOnUpdateBufferedAmountHandler(const JS::HandleValue handler) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::OnRecvSendFromChild(const JS::HandleValue data,
+                                                  uint32_t byteOffset,
+                                                  uint32_t byteLength,
+                                                  uint32_t trackingNumber) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::OpenWithExistSocketTransport(const nsAString &host,
+                                                           uint16_t port,
+                                                           nsISocketTransport *socketTransport,
+                                                           bool useSSL,
+                                                           const nsAString &binaryType) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+//
+// NrBaseSocket methods.
+//
+int NrTcpSocketIpc::create(nr_transport_addr *addr) {
+  int r, _status;
+  nsresult rv;
+  int32_t port;
+  nsCString host;
+
+  ReentrantMonitorAutoEnter mon(monitor_);
+
+  if (state_ != NR_INIT) {
+    ABORT(R_INTERNAL);
+  }
+
+  sts_thread_ = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
+  if (NS_FAILED(rv)) {
+    MOZ_ASSERT(false, "Failed to get STS thread");
+    ABORT(R_INTERNAL);
+  }
+
+  if ((r=nr_transport_addr_get_addrstring_and_port(addr, &host, &port))) {
+    ABORT(r);
+  }
+
+  // wildcard address will be resolved at NrSocketIpc::CallListenerVoid
+  if ((r=nr_transport_addr_copy(&my_addr_, addr))) {
+    ABORT(r);
+  }
+
+  // Wait until socket creation complete.
+  mon.Wait();
+
+  if (err_) {
+    ABORT(R_INTERNAL);
+  }
+
+  _status = 0;
+abort:
+  return(_status);
+}
+
+int NrTcpSocketIpc::sendto(const void *msg, size_t len,
+                           int flags, nr_transport_addr *to) {
+  MOZ_ASSERT(false);
+  return R_INTERNAL;
+}
+
+int NrTcpSocketIpc::recvfrom(void * buf, size_t maxlen,
+                             size_t *len, int flags,
+                             nr_transport_addr *from) {
+  MOZ_ASSERT(false);
+  return R_INTERNAL;
+}
+
+int NrTcpSocketIpc::getaddr(nr_transport_addr *addrp) {
+  ASSERT_ON_THREAD(sts_thread_);
+
+  ReentrantMonitorAutoEnter mon(monitor_);
+
+  if (state_ != NR_CONNECTED) {
+    return R_INTERNAL;
+  }
+
+  return nr_transport_addr_copy(addrp, &my_addr_);
+}
+
+void NrTcpSocketIpc::close() {
+  ASSERT_ON_THREAD(sts_thread_);
+
+  if (state_ == NR_CLOSED || state_ == NR_CLOSING) {
+    return;
+  }
+
+  ReentrantMonitorAutoEnter mon(monitor_);
+  state_ = NR_CLOSING;
+
+  RUN_ON_THREAD(main_thread_,
+                mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                                      &NrTcpSocketIpc::close_m),
+                NS_DISPATCH_NORMAL);
+
+  //remove all enqueued messages
+  std::queue<RefPtr<nr_tcp_message> > empty;
+  std::swap(msg_queue_, empty);
+}
+
+int NrTcpSocketIpc::connect(nr_transport_addr *addr) {
+  nsCString remote_addr, local_addr;
+  int32_t remote_port, local_port;
+  int r, _status;
+  if ((r=nr_transport_addr_get_addrstring_and_port(addr,
+                                                   &remote_addr,
+                                                   &remote_port))) {
+    ABORT(r);
+  }
+
+  if ((r=nr_transport_addr_get_addrstring_and_port(&my_addr_,
+                                                   &local_addr,
+                                                   &local_port))) {
+    ABORT(r);
+  }
+
+  state_ = NR_CONNECTING;
+  RUN_ON_THREAD(main_thread_,
+                mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                             &NrTcpSocketIpc::connect_m,
+                             remote_addr,
+                             static_cast<uint16_t>(remote_port),
+                             local_addr,
+                             static_cast<uint16_t>(local_port)),
+                false);
+
+  // Make caller wait for ready to write.
+  _status = R_WOULDBLOCK;
+ abort:
+  return _status;
+}
+
+int NrTcpSocketIpc::write(const void *msg, size_t len, size_t *written) {
+  int _status;
+  if (!socket_child_)
+    ABORT(R_FAILED);
+
+  mozilla::SyncRunnable::DispatchToThread(
+    main_thread_,
+    mozilla::WrapRunnableRet(nsRefPtr<NrTcpSocketIpc>(this),
+                             &NrTcpSocketIpc::write_m,
+                             msg,
+                             len,
+                             written,
+                             &_status),
+    false);
+ abort:
+  return _status;
+}
+
+int NrTcpSocketIpc::read(void* buf, size_t maxlen, size_t *len) { 
+  int _status;
+  nsRefPtr<nr_tcp_message> msg;
+
+  if (msg_queue_.size() == 0) {
+    ABORT(R_WOULDBLOCK);
+  }
+
+  msg = msg_queue_.front();
+
+  {
+    size_t consumed_len = std::min(maxlen, msg->unread_byte());
+    memcpy(buf, msg->reading_pointer(), consumed_len);
+    if (consumed_len < msg->unread_byte()) {
+      // There is still something left in buffer.
+      msg->read_byte += consumed_len;
+    } else {
+      msg_queue_.pop();
+    }
+    *len = consumed_len;
+  }
+
+ abort:
+  return _status;
+}
+
+void NrTcpSocketIpc::connect_m(const nsACString &remote_addr,
+                               uint16_t remote_port,
+                               const nsACString &local_addr,
+                               uint16_t local_port) {
+  ASSERT_ON_THREAD(main_thread_);
+
+  ReentrantMonitorAutoEnter mon(monitor_);
+
+  nsresult rv;
+  socket_child_ = do_CreateInstance("@mozilla.org/tcp-socket-child;1", &rv);
+  if (NS_FAILED(rv)) {
+    err_ = true;
+    MOZ_ASSERT(false, "Failed to create TCPSocketChild.");
+  }
+
+  socket_child_->SendWindowlessOpenBind(this,
+                                        remote_addr, remote_port,
+                                        local_addr, local_port,
+                                        /* use ssl */ false);
+}
+
+int NrTcpSocketIpc::write_m(const void *msg, size_t len, size_t *written) {
+  ASSERT_ON_THREAD(main_thread_);
+
+  int _status;
+  InfallibleTArray<uint8_t> arr(len);
+
+  if (sent_byte_ + len > nsITCPSocketInternal::BUFFER_SIZE) {
+    ABORT(R_WOULDBLOCK);
+  }
+
+  sent_byte_ += len;
+
+  memcpy(arr.Elements(), static_cast<const uint8_t*>(msg), len);
+  socket_child_->SendSendArray(&arr, tracking_number_);
+ abort:
+  return _status;
+}
+
+void NrTcpSocketIpc::close_m() {
+  socket_child_->SendClose();
+}
+
+void NrTcpSocketIpc::message_sent_s() {
+  ASSERT_ON_THREAD(sts_thread_);
+  if ((poll_flags() & PR_POLL_WRITE)) {
+    fire_callback(NR_ASYNC_WAIT_WRITE);
+  }
+}
+
+void NrTcpSocketIpc::recv_message_s(nr_tcp_message *msg) {
+  ASSERT_ON_THREAD(sts_thread_);
+  msg_queue_.push(msg);
+
+  if ((poll_flags() & PR_POLL_READ)) {
+    fire_callback(NR_ASYNC_WAIT_READ);
+  }
+}
+
+void NrTcpSocketIpc::update_state_s(NrSocketIpcState next_state) {
+  ASSERT_ON_THREAD(sts_thread_);
+  if (state_ == NR_CONNECTING) {
+    if (next_state == NR_CONNECTED) {
+      state_ = NR_CONNECTED;
+      if ((poll_flags() & PR_POLL_WRITE)) {
+        fire_callback(NR_ASYNC_WAIT_WRITE);
+      }
+    }
+  }
+}
+
 }  // close namespace
 
 
@@ -1115,7 +1470,16 @@ int nr_socket_local_create(nr_transport_addr *addr, nr_socket **sockp) {
   } else {
     nsCOMPtr<nsIThread> main_thread;
     NS_GetMainThread(getter_AddRefs(main_thread));
-    sock = new NrSocketIpc(main_thread.get());
+    switch (addr->protocol) {
+      case IPPROTO_UDP:
+        // TODO: rename NrSocketIpc to NrUdpSocketIpc or merge
+        // 2 classes if possible.
+        sock = new NrSocketIpc(main_thread.get());
+        break;
+      case IPPROTO_TCP:
+        sock = new NrTcpSocketIpc(main_thread.get());
+        break;
+    }
   }
 
   int r, _status;

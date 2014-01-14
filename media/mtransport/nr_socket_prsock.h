@@ -60,6 +60,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nsIUDPSocketChild.h"
 #include "nsProxyRelease.h"
 
+#include "nsIDOMTCPSocket.h"
 #include "databuffer.h"
 #include "m_cpp_utils.h"
 #include "mozilla/ReentrantMonitor.h"
@@ -238,6 +239,95 @@ private:
   nsCOMPtr<nsIEventTarget> sts_thread_;
   const nsCOMPtr<nsIEventTarget> main_thread_;
   ReentrantMonitor monitor_;
+};
+
+struct nr_tcp_message {
+  nr_tcp_message(nsAutoPtr<DataBuffer> &data)
+    : read_byte(0)
+    , data(data) {
+  }
+
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nr_tcp_message);
+
+  uint8_t *reading_pointer() {
+    return data->data() + read_byte;
+  }
+
+  size_t unread_byte() {
+    return data->len() - read_byte;
+  }
+
+  size_t read_byte;
+  nsAutoPtr<DataBuffer> data;
+
+private:
+  ~nr_tcp_message() {}
+  DISALLOW_COPY_ASSIGN(nr_tcp_message);
+};
+
+class NrTcpSocketIpc : public NrSocketBase,
+                       public nsITCPSocketInternalNative {
+public:
+
+  enum NrSocketIpcState {
+    NR_ERROR,
+    NR_INIT,
+    NR_CONNECTING,
+    NR_CONNECTED,
+    NR_CLOSING,
+    NR_CLOSED,
+  };
+
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_NSITCPSOCKETINTERNAL
+  NS_DECL_NSITCPSOCKETINTERNALNATIVE
+
+  NrTcpSocketIpc(const nsCOMPtr<nsIEventTarget> &main_thread);
+
+  // Implementations of the NrSocketBase APIs
+  virtual int create(nr_transport_addr *addr);
+  virtual int sendto(const void *msg, size_t len,
+                     int flags, nr_transport_addr *to);
+  virtual int recvfrom(void * buf, size_t maxlen,
+                       size_t *len, int flags,
+                       nr_transport_addr *from);
+  virtual int getaddr(nr_transport_addr *addrp);
+  virtual void close();
+  virtual int connect(nr_transport_addr *addr);
+  virtual int write(const void *msg, size_t len, size_t *written);
+  virtual int read(void* buf, size_t maxlen, size_t *len);
+
+private:
+  DISALLOW_COPY_ASSIGN(NrTcpSocketIpc);
+  virtual ~NrTcpSocketIpc() {};
+
+  // Main thread executors of the NrSocketBase APIs
+  void connect_m(const nsACString &remote_addr,
+                 uint16_t remote_port,
+                 const nsACString &local_addr,
+                 uint16_t local_port);
+  int write_m(const void *msg, size_t len, size_t *written);
+  void close_m();
+
+  // STS thread executor
+  void message_sent_s();
+  void recv_message_s(nr_tcp_message *msg);
+  void update_state_s(NrSocketIpcState next_state);
+
+  bool err_;
+
+  // |state_| can be accessed on STS.
+  NrSocketIpcState state_;
+  std::queue<RefPtr<nr_tcp_message> > msg_queue_;
+
+  nsCOMPtr<nsITCPSocketChild> socket_child_;
+  nsCOMPtr<nsIEventTarget> sts_thread_;
+  const nsCOMPtr<nsIEventTarget> main_thread_;
+  ReentrantMonitor monitor_;
+
+  // Expected to be accessed on main thread.
+  uint32_t sent_byte_;
+  uint32_t tracking_number_;
 };
 
 int nr_netaddr_to_transport_addr(const net::NetAddr *netaddr,
