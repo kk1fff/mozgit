@@ -60,6 +60,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nsIUDPSocketChild.h"
 #include "nsProxyRelease.h"
 
+#include "nsIDOMTCPSocket.h"
 #include "databuffer.h"
 #include "m_cpp_utils.h"
 #include "mozilla/ReentrantMonitor.h"
@@ -188,7 +189,7 @@ private:
   DISALLOW_COPY_ASSIGN(nr_udp_message);
 };
 
-class NrSocketIpc : public NrSocketBase,
+class NrUdpSocketIpc : public NrSocketBase,
                     public nsIUDPSocketInternal {
 public:
 
@@ -203,7 +204,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIUDPSOCKETINTERNAL
 
-  explicit NrSocketIpc(const nsCOMPtr<nsIEventTarget> &main_thread);
+  explicit NrUdpSocketIpc(const nsCOMPtr<nsIEventTarget> &main_thread);
 
   // Implementations of the NrSocketBase APIs
   virtual int create(nr_transport_addr *addr);
@@ -219,9 +220,9 @@ public:
   virtual int read(void* buf, size_t maxlen, size_t *len);
 
 private:
-  virtual ~NrSocketIpc() {};
+  virtual ~NrUdpSocketIpc() {};
 
-  DISALLOW_COPY_ASSIGN(NrSocketIpc);
+  DISALLOW_COPY_ASSIGN(NrUdpSocketIpc);
 
   // Main thread executors of the NrSocketBase APIs
   void create_m(const nsACString &host, const uint16_t port);
@@ -238,6 +239,96 @@ private:
   nsCOMPtr<nsIEventTarget> sts_thread_;
   const nsCOMPtr<nsIEventTarget> main_thread_;
   ReentrantMonitor monitor_;
+};
+
+struct nr_tcp_message {
+  nr_tcp_message(nsAutoPtr<DataBuffer> &data)
+    : read_byte(0)
+    , data(data) {
+  }
+
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(nr_tcp_message);
+
+  uint8_t *reading_pointer() {
+    return data->data() + read_byte;
+  }
+
+  size_t unread_byte() {
+    return data->len() - read_byte;
+  }
+
+  size_t read_byte;
+  nsAutoPtr<DataBuffer> data;
+
+private:
+  ~nr_tcp_message() {}
+  DISALLOW_COPY_ASSIGN(nr_tcp_message);
+};
+
+class NrTcpSocketIpc : public NrSocketBase,
+                       public nsITCPSocketInternalNative {
+public:
+
+  enum NrSocketIpcState {
+    NR_INIT,
+    NR_CONNECTING,
+    NR_CONNECTED,
+    NR_CLOSING,
+    NR_CLOSED,
+  };
+
+  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_NSITCPSOCKETINTERNAL
+  NS_DECL_NSITCPSOCKETINTERNALNATIVE
+
+  NrTcpSocketIpc(const nsCOMPtr<nsIEventTarget> &main_thread);
+
+  // Implementations of the NrSocketBase APIs
+  virtual int create(nr_transport_addr *addr);
+  virtual int sendto(const void *msg, size_t len,
+                     int flags, nr_transport_addr *to);
+  virtual int recvfrom(void * buf, size_t maxlen,
+                       size_t *len, int flags,
+                       nr_transport_addr *from);
+  virtual int getaddr(nr_transport_addr *addrp);
+  virtual void close();
+  virtual int connect(nr_transport_addr *addr);
+  virtual int write(const void *msg, size_t len, size_t *written);
+  virtual int read(void* buf, size_t maxlen, size_t *len);
+
+private:
+  class TcpSocketReadyRunner;
+  DISALLOW_COPY_ASSIGN(NrTcpSocketIpc);
+  virtual ~NrTcpSocketIpc() {};
+
+  // Main thread executors of the NrSocketBase APIs
+  void connect_m(const nsACString &remote_addr,
+                 uint16_t remote_port,
+                 const nsACString &local_addr,
+                 uint16_t local_port);
+  void write_m(InfallibleTArray<uint8_t>* buf,
+               uint32_t tracking_number);
+  void close_m();
+
+  // STS thread executor
+  void message_sent_s(uint32_t bufferedAmount, uint32_t tracking_number);
+  void recv_message_s(nr_tcp_message *msg);
+  void update_state_s(NrSocketIpcState next_state);
+  void maybe_post_socket_ready();
+
+  // variables that can only be accessed on STS.
+  NrSocketIpcState state_;
+  std::queue<RefPtr<nr_tcp_message> > msg_queue_;
+  uint32_t buffered_byte_;
+  uint32_t tracking_number_;
+
+  // main thread.
+  nsCOMPtr<nsITCPSocketChild> socket_child_;
+
+  // Can be accessed on STS and main thread.
+  bool err_;
+  nsCOMPtr<nsIEventTarget> sts_thread_;
+  const nsCOMPtr<nsIEventTarget> main_thread_;
 };
 
 int nr_netaddr_to_transport_addr(const net::NetAddr *netaddr,

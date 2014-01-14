@@ -106,6 +106,8 @@ nrappkit copyright:
 #include "nsXPCOM.h"
 #include "nsXULAppAPI.h"
 #include "runnable_utils.h"
+#include "mozilla/SyncRunnable.h"
+#include "nsTArray.h"
 
 extern "C" {
 #include "nr_api.h"
@@ -693,19 +695,19 @@ abort:
   return(_status);
 }
 
-// NrSocketIpc Implementation
-NS_IMPL_ISUPPORTS(NrSocketIpc, nsIUDPSocketInternal)
+// NrUdpSocketIpc Implementation
+NS_IMPL_ISUPPORTS(NrUdpSocketIpc, nsIUDPSocketInternal)
 
-NrSocketIpc::NrSocketIpc(const nsCOMPtr<nsIEventTarget> &main_thread)
+NrUdpSocketIpc::NrUdpSocketIpc(const nsCOMPtr<nsIEventTarget> &main_thread)
     : err_(false),
       state_(NR_INIT),
       main_thread_(main_thread),
-      monitor_("NrSocketIpc") {
+      monitor_("NrUdpSocketIpc") {
 }
 
 // IUDPSocketInternal interfaces
 // callback while error happened in UDP socket operation
-NS_IMETHODIMP NrSocketIpc::CallListenerError(const nsACString &message,
+NS_IMETHODIMP NrUdpSocketIpc::CallListenerError(const nsACString &message,
                                              const nsACString &filename,
                                              uint32_t line_number) {
   ASSERT_ON_THREAD(main_thread_);
@@ -721,7 +723,7 @@ NS_IMETHODIMP NrSocketIpc::CallListenerError(const nsACString &message,
 }
 
 // callback while receiving UDP packet
-NS_IMETHODIMP NrSocketIpc::CallListenerReceivedData(const nsACString &host,
+NS_IMETHODIMP NrUdpSocketIpc::CallListenerReceivedData(const nsACString &host,
                                                     uint16_t port,
                                                     const uint8_t *data,
                                                     uint32_t data_length) {
@@ -751,15 +753,15 @@ NS_IMETHODIMP NrSocketIpc::CallListenerReceivedData(const nsACString &host,
   RefPtr<nr_udp_message> msg(new nr_udp_message(addr, buf));
 
   RUN_ON_THREAD(sts_thread_,
-                mozilla::WrapRunnable(nsRefPtr<NrSocketIpc>(this),
-                                      &NrSocketIpc::recv_callback_s,
+                mozilla::WrapRunnable(nsRefPtr<NrUdpSocketIpc>(this),
+                                      &NrUdpSocketIpc::recv_callback_s,
                                       msg),
                 NS_DISPATCH_NORMAL);
   return NS_OK;
 }
 
 // callback while UDP socket is opened
-NS_IMETHODIMP NrSocketIpc::CallListenerOpened() {
+NS_IMETHODIMP NrUdpSocketIpc::CallListenerOpened() {
   ASSERT_ON_THREAD(main_thread_);
   ReentrantMonitorAutoEnter mon(monitor_);
 
@@ -813,7 +815,7 @@ NS_IMETHODIMP NrSocketIpc::CallListenerOpened() {
 }
 
 // callback while UDP socket is closed
-NS_IMETHODIMP NrSocketIpc::CallListenerClosed() {
+NS_IMETHODIMP NrUdpSocketIpc::CallListenerClosed() {
   ASSERT_ON_THREAD(main_thread_);
 
   ReentrantMonitorAutoEnter mon(monitor_);
@@ -825,7 +827,7 @@ NS_IMETHODIMP NrSocketIpc::CallListenerClosed() {
 }
 
 // nr_socket public APIs
-int NrSocketIpc::create(nr_transport_addr *addr) {
+int NrUdpSocketIpc::create(nr_transport_addr *addr) {
   ASSERT_ON_THREAD(sts_thread_);
 
   int r, _status;
@@ -839,12 +841,6 @@ int NrSocketIpc::create(nr_transport_addr *addr) {
     ABORT(R_INTERNAL);
   }
 
-  // Bug 950660: Remote TCP socket is not supported yet.
-  if (NS_WARN_IF(addr->protocol != IPPROTO_UDP)) {
-    MOZ_ASSERT(false, "NrSocket over TCP is not e10s ready, see Bug 950660");
-    ABORT(R_INTERNAL);
-  }
-
   sts_thread_ = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
   if (NS_FAILED(rv)) {
     MOZ_ASSERT(false, "Failed to get STS thread");
@@ -855,7 +851,7 @@ int NrSocketIpc::create(nr_transport_addr *addr) {
     ABORT(r);
   }
 
-  // wildcard address will be resolved at NrSocketIpc::CallListenerVoid
+  // wildcard address will be resolved at NrUdpSocketIpc::CallListenerVoid
   if ((r=nr_transport_addr_copy(&my_addr_, addr))) {
     ABORT(r);
   }
@@ -863,8 +859,8 @@ int NrSocketIpc::create(nr_transport_addr *addr) {
   state_ = NR_CONNECTING;
 
   RUN_ON_THREAD(main_thread_,
-                mozilla::WrapRunnable(nsRefPtr<NrSocketIpc>(this),
-                                      &NrSocketIpc::create_m,
+                mozilla::WrapRunnable(nsRefPtr<NrUdpSocketIpc>(this),
+                                      &NrUdpSocketIpc::create_m,
                                       host, static_cast<uint16_t>(port)),
                 NS_DISPATCH_NORMAL);
 
@@ -882,7 +878,7 @@ abort:
   return(_status);
 }
 
-int NrSocketIpc::sendto(const void *msg, size_t len, int flags,
+int NrUdpSocketIpc::sendto(const void *msg, size_t len, int flags,
                         nr_transport_addr *to) {
   ASSERT_ON_THREAD(sts_thread_);
 
@@ -910,22 +906,22 @@ int NrSocketIpc::sendto(const void *msg, size_t len, int flags,
   nsAutoPtr<DataBuffer> buf(new DataBuffer(static_cast<const uint8_t*>(msg), len));
 
   RUN_ON_THREAD(main_thread_,
-                mozilla::WrapRunnable(nsRefPtr<NrSocketIpc>(this),
-                                      &NrSocketIpc::sendto_m,
+                mozilla::WrapRunnable(nsRefPtr<NrUdpSocketIpc>(this),
+                                      &NrUdpSocketIpc::sendto_m,
                                       addr, buf),
                 NS_DISPATCH_NORMAL);
   return 0;
 }
 
-void NrSocketIpc::close() {
+void NrUdpSocketIpc::close() {
   ASSERT_ON_THREAD(sts_thread_);
 
   ReentrantMonitorAutoEnter mon(monitor_);
   state_ = NR_CLOSING;
 
   RUN_ON_THREAD(main_thread_,
-                mozilla::WrapRunnable(nsRefPtr<NrSocketIpc>(this),
-                                      &NrSocketIpc::close_m),
+                mozilla::WrapRunnable(nsRefPtr<NrUdpSocketIpc>(this),
+                                      &NrUdpSocketIpc::close_m),
                 NS_DISPATCH_NORMAL);
 
   //remove all enqueued messages
@@ -933,7 +929,7 @@ void NrSocketIpc::close() {
   std::swap(received_msgs_, empty);
 }
 
-int NrSocketIpc::recvfrom(void *buf, size_t maxlen, size_t *len, int flags,
+int NrUdpSocketIpc::recvfrom(void *buf, size_t maxlen, size_t *len, int flags,
                           nr_transport_addr *from) {
   ASSERT_ON_THREAD(sts_thread_);
 
@@ -977,7 +973,7 @@ abort:
   return(_status);
 }
 
-int NrSocketIpc::getaddr(nr_transport_addr *addrp) {
+int NrUdpSocketIpc::getaddr(nr_transport_addr *addrp) {
   ASSERT_ON_THREAD(sts_thread_);
 
   ReentrantMonitorAutoEnter mon(monitor_);
@@ -989,23 +985,23 @@ int NrSocketIpc::getaddr(nr_transport_addr *addrp) {
   return nr_transport_addr_copy(addrp, &my_addr_);
 }
 
-int NrSocketIpc::connect(nr_transport_addr *addr) {
+int NrUdpSocketIpc::connect(nr_transport_addr *addr) {
   MOZ_ASSERT(false);
   return R_INTERNAL;
 }
 
-int NrSocketIpc::write(const void *msg, size_t len, size_t *written) {
+int NrUdpSocketIpc::write(const void *msg, size_t len, size_t *written) {
   MOZ_ASSERT(false);
   return R_INTERNAL;
 }
 
-int NrSocketIpc::read(void* buf, size_t maxlen, size_t *len) {
+int NrUdpSocketIpc::read(void* buf, size_t maxlen, size_t *len) {
   MOZ_ASSERT(false);
   return R_INTERNAL;
 }
 
 // Main thread executors
-void NrSocketIpc::create_m(const nsACString &host, const uint16_t port) {
+void NrUdpSocketIpc::create_m(const nsACString &host, const uint16_t port) {
   ASSERT_ON_THREAD(main_thread_);
 
   ReentrantMonitorAutoEnter mon(monitor_);
@@ -1032,7 +1028,7 @@ void NrSocketIpc::create_m(const nsACString &host, const uint16_t port) {
   }
 }
 
-void NrSocketIpc::sendto_m(const net::NetAddr &addr, nsAutoPtr<DataBuffer> buf) {
+void NrUdpSocketIpc::sendto_m(const net::NetAddr &addr, nsAutoPtr<DataBuffer> buf) {
   ASSERT_ON_THREAD(main_thread_);
 
   MOZ_ASSERT(socket_child_);
@@ -1046,7 +1042,7 @@ void NrSocketIpc::sendto_m(const net::NetAddr &addr, nsAutoPtr<DataBuffer> buf) 
   }
 }
 
-void NrSocketIpc::close_m() {
+void NrUdpSocketIpc::close_m() {
   ASSERT_ON_THREAD(main_thread_);
 
   if (socket_child_) {
@@ -1055,7 +1051,7 @@ void NrSocketIpc::close_m() {
   }
 }
 
-void NrSocketIpc::recv_callback_s(RefPtr<nr_udp_message> msg) {
+void NrUdpSocketIpc::recv_callback_s(RefPtr<nr_udp_message> msg) {
   ASSERT_ON_THREAD(sts_thread_);
 
   {
@@ -1070,6 +1066,406 @@ void NrSocketIpc::recv_callback_s(RefPtr<nr_udp_message> msg) {
 
   if ((poll_flags() & PR_POLL_READ)) {
     fire_callback(NR_ASYNC_WAIT_READ);
+  }
+}
+
+// TCPSocket.
+class NrTcpSocketIpc::TcpSocketReadyRunner: public nsRunnable
+{
+public:
+  TcpSocketReadyRunner(NrTcpSocketIpc *sck)
+    : socket_(sck) {}
+
+  NS_IMETHODIMP Run() {
+    socket_->maybe_post_socket_ready();
+    return NS_OK;
+  }
+
+private:
+  nsRefPtr<NrTcpSocketIpc> socket_;
+};
+
+
+NS_IMPL_ISUPPORTS(NrTcpSocketIpc,
+                  nsITCPSocketInternal,
+                  nsITCPSocketInternalNative)
+
+NrTcpSocketIpc::NrTcpSocketIpc(const nsCOMPtr<nsIEventTarget> &main_thread)
+: state_(NR_INIT),
+  buffered_byte_(0),
+  tracking_number_(0),
+  err_(false),
+  main_thread_(main_thread) {
+}
+
+//
+// nsITCPSocketInternal methods
+//
+NS_IMETHODIMP NrTcpSocketIpc::UpdateReadyState(const nsAString &readyState) {
+  NrSocketIpcState next_state = NR_INIT;
+
+  if (readyState.EqualsLiteral("open")) {
+    next_state = NR_CONNECTED;
+  } else if (readyState.EqualsLiteral("closing")) {
+    next_state = NR_CLOSING;
+  } else if (readyState.EqualsLiteral("closed")) {
+    next_state = NR_CLOSED;
+    socket_child_ = nullptr;
+  } else {
+    r_log(LOG_GENERIC, LOG_INFO,
+          "Not handling state changing to %s from TCPSocketChild",
+          NS_ConvertUTF16toUTF8(readyState).get());
+    return NS_OK;
+  }
+
+  RUN_ON_THREAD(sts_thread_,
+                mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                                      &NrTcpSocketIpc::update_state_s,
+                                      next_state),
+                false);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::UpdateBufferedAmount(uint32_t buffered_amount,
+                                                   uint32_t tracking_number) {
+  RUN_ON_THREAD(sts_thread_,
+                mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                                      &NrTcpSocketIpc::message_sent_s,
+                                      buffered_amount,
+                                      tracking_number),
+                NS_DISPATCH_NORMAL);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CallListenerNativeArray(uint8_t *buf, uint32_t len) {
+  // Called when we received data.
+
+  nsAutoPtr<DataBuffer> data_buf(new DataBuffer(buf, len));
+  nsRefPtr<nr_tcp_message> msg = new nr_tcp_message(data_buf);
+
+  RUN_ON_THREAD(sts_thread_,
+                mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                                      &NrTcpSocketIpc::recv_message_s,
+                                      msg),
+                NS_DISPATCH_NORMAL);
+  return NS_OK;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CallListenerError(const nsAString &type,
+                                                const nsAString &name) {
+  r_log(LOG_GENERIC, LOG_ERR,
+        "Error from TCPSocketChild: type: %s, name: %s",
+        NS_ConvertUTF16toUTF8(type).get(),
+        NS_ConvertUTF16toUTF8(name).get());
+  socket_child_ = nullptr;
+
+  RUN_ON_THREAD(sts_thread_,
+                mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                                      &NrTcpSocketIpc::update_state_s,
+                                      NR_CLOSED),
+                false);
+  
+  return NS_OK;
+}
+
+// methods of nsITCPSocketInternal that we are not going to implement.
+
+NS_IMETHODIMP NrTcpSocketIpc::CallListenerArrayBuffer(const nsAString &type,
+                                                      const JS::HandleValue data) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CallListenerData(const nsAString &type,
+                                               const nsAString &data) {
+  return NS_OK;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CallListenerVoid(const nsAString &type) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CreateAcceptedParent(nsISocketTransport *transport,
+                                                   const nsAString &binaryType,
+                                                   nsIDOMTCPSocket **retval) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::CreateAcceptedChild(nsITCPSocketChild *socketChild,
+                                                  const nsAString &binaryType,
+                                                  nsIDOMWindow *window,
+                                                  nsIDOMTCPSocket **retval) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::SetAppId(uint32_t appId) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::SetOnUpdateBufferedAmountHandler(const JS::HandleValue handler) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::OnRecvSendFromChild(const JS::HandleValue data,
+                                                  uint32_t byteOffset,
+                                                  uint32_t byteLength,
+                                                  uint32_t trackingNumber) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP NrTcpSocketIpc::OpenWithExistSocketTransport(const nsAString &host,
+                                                           uint16_t port,
+                                                           nsISocketTransport *socketTransport,
+                                                           bool useSSL,
+                                                           const nsAString &binaryType,
+                                                           nsIDOMTCPSocket **retval) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+//
+// NrBaseSocket methods.
+//
+int NrTcpSocketIpc::create(nr_transport_addr *addr) {
+  int r, _status;
+  nsresult rv;
+  int32_t port;
+  nsCString host;
+
+  if (state_ != NR_INIT) {
+    ABORT(R_INTERNAL);
+  }
+
+  sts_thread_ = do_GetService(NS_SOCKETTRANSPORTSERVICE_CONTRACTID, &rv);
+  if (NS_FAILED(rv)) {
+    MOZ_ASSERT(false, "Failed to get STS thread");
+    ABORT(R_INTERNAL);
+  }
+
+  if ((r=nr_transport_addr_get_addrstring_and_port(addr, &host, &port))) {
+    ABORT(r);
+  }
+
+  if ((r=nr_transport_addr_copy(&my_addr_, addr))) {
+    ABORT(r);
+  }
+
+  _status = 0;
+abort:
+  return(_status);
+}
+
+int NrTcpSocketIpc::sendto(const void *msg, size_t len,
+                           int flags, nr_transport_addr *to) {
+  MOZ_ASSERT(false);
+  return R_INTERNAL;
+}
+
+int NrTcpSocketIpc::recvfrom(void * buf, size_t maxlen,
+                             size_t *len, int flags,
+                             nr_transport_addr *from) {
+  MOZ_ASSERT(false);
+  return R_INTERNAL;
+}
+
+int NrTcpSocketIpc::getaddr(nr_transport_addr *addrp) {
+  ASSERT_ON_THREAD(sts_thread_);
+  return nr_transport_addr_copy(addrp, &my_addr_);
+}
+
+void NrTcpSocketIpc::close() {
+  ASSERT_ON_THREAD(sts_thread_);
+
+  if (state_ == NR_CLOSED || state_ == NR_CLOSING) {
+    return;
+  }
+
+  state_ = NR_CLOSING;
+
+  RUN_ON_THREAD(main_thread_,
+                mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                                      &NrTcpSocketIpc::close_m),
+                NS_DISPATCH_NORMAL);
+
+  //remove all enqueued messages
+  {
+    std::queue<RefPtr<nr_tcp_message> > empty;
+    std::swap(msg_queue_, empty);
+  }
+}
+
+int NrTcpSocketIpc::connect(nr_transport_addr *addr) {
+  nsCString remote_addr, local_addr;
+  int32_t remote_port, local_port;
+  int r, _status;
+  if ((r=nr_transport_addr_get_addrstring_and_port(addr,
+                                                   &remote_addr,
+                                                   &remote_port))) {
+    ABORT(r);
+  }
+
+  if ((r=nr_transport_addr_get_addrstring_and_port(&my_addr_,
+                                                   &local_addr,
+                                                   &local_port))) {
+    ABORT(r);
+  }
+
+  state_ = NR_CONNECTING;
+  RUN_ON_THREAD(main_thread_,
+                mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                             &NrTcpSocketIpc::connect_m,
+                             remote_addr,
+                             static_cast<uint16_t>(remote_port),
+                             local_addr,
+                             static_cast<uint16_t>(local_port)),
+                NS_DISPATCH_NORMAL);
+
+  // Make caller wait for ready to write.
+  _status = R_WOULDBLOCK;
+ abort:
+  return _status;
+}
+
+int NrTcpSocketIpc::write(const void *msg, size_t len, size_t *written) {
+  int _status = 0;
+  if (state_ != NR_CONNECTED)
+    ABORT(R_FAILED);
+
+  if (buffered_byte_ >= nsITCPSocketInternal::BUFFER_SIZE) {
+    ABORT(R_WOULDBLOCK);
+  }
+
+  buffered_byte_ += len;
+  {
+    InfallibleTArray<uint8_t>* arr = new InfallibleTArray<uint8_t>();
+    arr->AppendElements(static_cast<const uint8_t*>(msg), len);
+    RUN_ON_THREAD(main_thread_,
+                  mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                                        &NrTcpSocketIpc::write_m,
+                                        nsAutoPtr<InfallibleTArray<uint8_t>>(arr),
+                                        ++tracking_number_),
+                  NS_DISPATCH_NORMAL);
+  }
+  *written = len;
+ abort:
+  return _status;
+}
+
+int NrTcpSocketIpc::read(void* buf, size_t maxlen, size_t *len) { 
+  int _status = 0;
+  if (state_ != NR_CONNECTED)
+    ABORT(R_FAILED);
+
+  if (msg_queue_.size() == 0) {
+    ABORT(R_WOULDBLOCK);
+  }
+
+  {
+    nsRefPtr<nr_tcp_message> msg(msg_queue_.front());
+    size_t consumed_len = std::min(maxlen, msg->unread_byte());
+    memcpy(buf, msg->reading_pointer(), consumed_len);
+    if (consumed_len < msg->unread_byte()) {
+      // There is still something left in buffer.
+      msg->read_byte += consumed_len;
+    } else {
+      msg_queue_.pop();
+    }
+    *len = consumed_len;
+  }
+
+ abort:
+  return _status;
+}
+
+void NrTcpSocketIpc::connect_m(const nsACString &remote_addr,
+                               uint16_t remote_port,
+                               const nsACString &local_addr,
+                               uint16_t local_port) {
+  ASSERT_ON_THREAD(main_thread_);
+
+  nsresult rv;
+  socket_child_ = do_CreateInstance("@mozilla.org/tcp-socket-child;1", &rv);
+  if (NS_FAILED(rv)) {
+    RUN_ON_THREAD(sts_thread_,
+                  mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
+                                        &NrTcpSocketIpc::update_state_s,
+                                        NR_CLOSED),
+                  false);
+    MOZ_ASSERT(false, "Failed to create TCPSocketChild.");
+  }
+
+  socket_child_->SendWindowlessOpenBind(this,
+                                        remote_addr, remote_port,
+                                        local_addr, local_port,
+                                        /* use ssl */ false);
+}
+
+void NrTcpSocketIpc::write_m(InfallibleTArray<uint8_t>* arr,
+                             uint32_t tracking_number) {
+  ASSERT_ON_THREAD(main_thread_);
+  if (!socket_child_) {
+    return;
+  }
+  socket_child_->SendSendArray(arr, tracking_number);
+}
+
+void NrTcpSocketIpc::close_m() {
+  ASSERT_ON_THREAD(main_thread_);
+  if (!socket_child_) {
+    return;
+  }
+  socket_child_->SendClose();
+}
+
+void NrTcpSocketIpc::message_sent_s(uint32_t buffered_amount,
+                                    uint32_t tracking_number) {
+  ASSERT_ON_THREAD(sts_thread_);
+  if (tracking_number != tracking_number_) {
+    return;
+  }
+
+  buffered_byte_ = buffered_amount;
+  maybe_post_socket_ready();
+}
+
+void NrTcpSocketIpc::recv_message_s(nr_tcp_message *msg) {
+  ASSERT_ON_THREAD(sts_thread_);
+  msg_queue_.push(msg);
+  maybe_post_socket_ready();
+}
+
+void NrTcpSocketIpc::update_state_s(NrSocketIpcState next_state) {
+  ASSERT_ON_THREAD(sts_thread_);
+  if (state_ == NR_CONNECTING) {
+    if (next_state == NR_CONNECTED) {
+      state_ = NR_CONNECTED;
+      maybe_post_socket_ready();
+    }
+  }
+}
+
+void NrTcpSocketIpc::maybe_post_socket_ready() {
+  bool has_event = false;
+  if (state_ == NR_CONNECTED) {
+    if (poll_flags() & PR_POLL_WRITE) {
+      if (buffered_byte_ < nsITCPSocketInternal::BUFFER_SIZE) {
+        fire_callback(NR_ASYNC_WAIT_WRITE);
+        has_event = true;
+      }
+    }
+    if (poll_flags() & PR_POLL_READ) {
+      if (msg_queue_.size()) {
+        fire_callback(NR_ASYNC_WAIT_READ);
+        has_event = true;
+      }
+    }
+  }
+
+  // If any event has been posted, we post a runnable to see
+  // if the events have to be posted again.
+  if (has_event) {
+    nsRefPtr<TcpSocketReadyRunner> runnable = new TcpSocketReadyRunner(this);
+    NS_DispatchToCurrentThread(runnable);
   }
 }
 
@@ -1115,7 +1511,14 @@ int nr_socket_local_create(nr_transport_addr *addr, nr_socket **sockp) {
   } else {
     nsCOMPtr<nsIThread> main_thread;
     NS_GetMainThread(getter_AddRefs(main_thread));
-    sock = new NrSocketIpc(main_thread.get());
+    switch (addr->protocol) {
+      case IPPROTO_UDP:
+        sock = new NrUdpSocketIpc(main_thread.get());
+        break;
+      case IPPROTO_TCP:
+        sock = new NrTcpSocketIpc(main_thread.get());
+        break;
+    }
   }
 
   int r, _status;
