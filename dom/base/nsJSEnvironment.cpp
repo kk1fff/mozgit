@@ -216,6 +216,10 @@ static nsIScriptSecurityManager *sSecurityManager;
 
 static bool sGCOnMemoryPressure;
 
+static nsRunnable *sScheduledCCRunnable = nullptr;
+static nsRunnable *sScheduledGCRunnable = nullptr;
+static nsITimer *sCollectionSuppress = nullptr;
+
 static PRTime
 GetCollectionTimeDelta()
 {
@@ -1887,6 +1891,84 @@ FullGCTimerFired(nsITimer* aTimer, void* aClosure)
                                  nsJSContext::IncrementalGC);
 }
 
+class ScheduledGCRunnable: nsRunnable
+{
+public:
+  ScheduledGCRunnable(JS::gcreason::Reason aReason
+                      IsIncremental aIncremental,
+                      IsCompartment aCompartment,
+                      IsShrinking aShrinking,
+                      int64_t aSliceMillis):
+    mReason (aReason),
+    mIncremental (aIncremental),
+    mCompartment (aCompartment),
+    mShrinking (aShrinking),
+    mSliceMillis (aSliceMillis) {}
+
+  // virtual ~ScheduledGCRunnable() {}
+
+private:
+  nsresult Run() {
+    nsJSContext::GarbageCollect(mReason,
+                                mIncremental,
+                                mCompartment,
+                                mShrinking,
+                                mSliceMillis);
+    return NS_OK;
+  }
+
+  JS::gcreason::Reason mReason;
+  IsIncremental mIncremental;
+  IsCompartment mCompartment;
+  IsShrinking mShrinking;
+  int64_t mSliceMillis;
+};
+
+class ScheduledCCRunnable: nsRunnable
+{
+public:
+  ScheduledCCRunnable(nsICycleCollectorListener *aListener,
+                      int32_t aExtraForgetSkippableCalls):
+    mListener(aListener),
+    mExtraForgetSkippableCalls(aExtraForgetSkippableCalls) {}
+
+  // virtual ~ScheduledCCRunnable() {}
+private:
+  nsresult Run() {
+    nsJSContext::CycleCollectNow(mListener, mExtraForgetSkippableCalls);
+    return NS_OK;
+  }
+
+  nsICycleCollectorListener *mListener;
+  int32_t mExtraForgetSkippableCalls;
+};
+
+class PriorityChanged: nsITimerCallback
+{
+public:
+  PriorityChanged() {}
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSITIMERCALLBACK
+private:
+  nsresult Notify() {
+    if (sScheduledGCRunnable) {
+      NS_DispatchToMainThread(sScheduledGCRunnable);
+      sScheduledGCRunnable = nullptr;
+    }
+    if (sScheduledCCRunnable) {
+      NS_DispatchToMainThread(sScheduledCCRunnable);
+      sScheduledCCRunnable = nullptr;
+    }
+  }
+};
+
+NS_IMPL_ISUPPORTS1(PriorityChanged, nsITimerCallback);
+
+nsJSContext::HoldGarbageCollection() {
+  nsCOMPtr<nsITimer> 
+  sCollectionSuppress = 
+}
+
 //static
 void
 nsJSContext::GarbageCollectNow(JS::gcreason::Reason aReason,
@@ -1895,6 +1977,17 @@ nsJSContext::GarbageCollectNow(JS::gcreason::Reason aReason,
                                IsShrinking aShrinking,
                                int64_t aSliceMillis)
 {
+  if (sPriorityJustChanged) {
+    if (!sScheduledGCRunnable) {
+      sScheduledGCRunnable = new ScheduledGCRunnable(aReason,
+                                                     aIncremental,
+                                                     aCompartment,
+                                                     aShrinking,
+                                                     aSliceMillis);
+    }
+    return;
+  };
+
   PROFILER_LABEL("GC", "GarbageCollectNow");
 
   MOZ_ASSERT_IF(aSliceMillis, aIncremental == IncrementalGC);
@@ -2123,6 +2216,14 @@ void
 nsJSContext::CycleCollectNow(nsICycleCollectorListener *aListener,
                              int32_t aExtraForgetSkippableCalls)
 {
+  if (sPriorityJustChanged) {
+    if (sScheduledCCRunnable) {
+      sScheduledCCRunnable = new ScheduledCCRunnable(aListener,
+                                                     aExtraForgetSkippableCalls);
+    }
+    return;
+  }
+
   if (!NS_IsMainThread()) {
     return;
   }
