@@ -134,6 +134,9 @@ public:
 
   static uint32_t CleanupsSinceLastGC();
 
+  static void DisableGC();
+  static void EnableGC();
+
   nsIScriptGlobalObject* GetCachedGlobalObject()
   {
     // Verify that we have a global so that this
@@ -191,6 +194,8 @@ private:
   static void JSOptionChangedCallback(const char *pref, void *data);
 
   static bool DOMOperationCallback(JSContext *cx);
+
+  static bool sDisableCollect;
 };
 
 class nsIJSRuntimeService;

@@ -302,6 +302,7 @@ child:
 
     GarbageCollect();
     CycleCollect();
+    SuppressCollect(int delay);
     
     /**
      * Start accessibility engine in content process.
