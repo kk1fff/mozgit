@@ -5788,6 +5788,9 @@ nsGlobalWindow::Dump(const nsAString& aStr)
     PrintToDebugger(cstr);
 #endif
 #ifdef ANDROID
+    if (NS_ConvertUTF16toUTF8(aStr).EqualsLiteral("xxxx")) {
+      __android_log_write(ANDROID_LOG_INFO, "GeckoDump1", cstr);
+    }
     __android_log_write(ANDROID_LOG_INFO, "GeckoDump", cstr);
 #endif
     FILE *fp = gDumpFile ? gDumpFile : stdout;

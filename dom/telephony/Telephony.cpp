@@ -298,6 +298,7 @@ Telephony::NoteDialedCallFromOtherInstance(uint32_t aServiceId,
 nsresult
 Telephony::NotifyCallsChanged(TelephonyCall* aCall)
 {
+  printf_stderr("TEST: Telephone.cpp NotifyCallsChanged, Telephony: %p\n", this);
   return DispatchCallEvent(NS_LITERAL_STRING("callschanged"), aCall);
 }
 
@@ -503,6 +504,7 @@ Telephony::EventListenerAdded(nsIAtom* aType)
 {
   if (aType == nsGkAtoms::oncallschanged) {
     // Fire oncallschanged on the next tick if the calls array is ready.
+    printf_stderr("TEST: EventListenerAdded: add oncallschanged, Telephony: %p", this);
     EnqueueEnumerationAck();
   }
 }

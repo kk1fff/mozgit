@@ -1365,12 +1365,7 @@ ContentParent::ContentParent(ContentParent* aTemplate,
     // Set the subprocess's priority (bg if we're a preallocated process, fg
     // otherwise).  We do this first because we're likely /lowering/ its CPU and
     // memory priority, which it has inherited from this process.
-    ProcessPriority priority;
-    if (IsPreallocated()) {
-        priority = PROCESS_PRIORITY_BACKGROUND;
-    } else {
-        priority = PROCESS_PRIORITY_FOREGROUND;
-    }
+    ProcessPriority priority = PROCESS_PRIORITY_MASTER;
 
     InitInternal(priority,
                  false, /* Setup Off-main thread compositing */

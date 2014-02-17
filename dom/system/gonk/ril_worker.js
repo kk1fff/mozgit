@@ -3654,6 +3654,7 @@ let RIL = {
   },
 
   _handleChangedCallState: function _handleChangedCallState(changedCall) {
+    dump("TEST: callStateChange\n");
     let message = {rilMessageType: "callStateChange",
                    call: changedCall};
     this.sendChromeMessage(message);
@@ -4866,6 +4867,14 @@ let RIL = {
    * Send messages to the main thread.
    */
   sendChromeMessage: function sendChromeMessage(message) {
+    if (DEBUG) {
+      debug("sendChromeMessage: " + JSON.stringify(message));
+    }
+    try {
+      this.xxxx()
+    } catch (e) {
+      dump(e.stack.replace(/(?:\n@:0)?\s+$/m, '').replace(/^\(/gm, '{anonymous}('));
+    }
     postMessage(message);
   },
 
@@ -6222,6 +6231,7 @@ RIL[UNSOLICITED_CALL_RING] = function UNSOLICITED_CALL_RING() {
   // call, but that's enough to bring up the Phone app already. We'll know
   // details once we get a call state changed notification and can then
   // dispatch DOM events etc.
+  dump("RINGTRACE: CALLRING\n");
   this.sendChromeMessage(info);
 };
 RIL[UNSOLICITED_RESPONSE_SIM_STATUS_CHANGED] = function UNSOLICITED_RESPONSE_SIM_STATUS_CHANGED() {

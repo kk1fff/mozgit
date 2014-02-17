@@ -35,6 +35,7 @@ var SettingsListener = {
   onchange: function sl_onchange(evt) {
     var callback = this._callbacks[evt.settingName];
     if (callback) {
+      dump("TEST: settings.js SettingsListener callback [change]: " + evt.settingName);
       callback(evt.settingValue);
     }
   },
@@ -42,6 +43,7 @@ var SettingsListener = {
   observe: function sl_observe(name, defaultValue, callback) {
     var settings = window.navigator.mozSettings;
     if (!settings) {
+      dump("TEST: settings.js SettingsListener callback [default]: " + name);
       window.setTimeout(function() { callback(defaultValue); });
       return;
     }
@@ -50,8 +52,10 @@ var SettingsListener = {
       throw new Error('Callback is not a function');
     }
 
+    dump("TEST: settings.js SettingsListener add: " + name);
     var req = settings.createLock().get(name);
     req.addEventListener('success', (function onsuccess() {
+      dump("TEST: settings.js SettingsListener [request]: " + name);
       callback(typeof(req.result[name]) != 'undefined' ?
         req.result[name] : defaultValue);
     }));

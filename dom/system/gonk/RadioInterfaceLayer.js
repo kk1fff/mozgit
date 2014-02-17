@@ -1468,6 +1468,7 @@ RadioInterface.prototype = {
   },
 
   handleUnsolicitedWorkerMessage: function handleUnsolicitedWorkerMessage(message) {
+    if (DEBUG) debug("handleUnsolicitedWorkerMessage: " + JSON.stringify(message));
     switch (message.rilMessageType) {
       case "callRing":
         gTelephonyProvider.notifyCallRing();
