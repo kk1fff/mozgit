@@ -2699,3 +2699,15 @@ nsFrameLoader::GetTabParent(nsITabParent** aTabParent)
   tp.forget(aTabParent);
   return NS_OK;
 }
+
+NS_IMETHODIMP
+nsFrameLoader::SetKillReason(const nsACString& reason) {
+  mKillReason = reason;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFrameLoader::GetKillReason(nsACString& reason) {
+  reason = mKillReason;
+  return NS_OK;
+}

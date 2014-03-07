@@ -109,6 +109,8 @@ public:
     static void GetAll(nsTArray<ContentParent*>& aArray);
     static void GetAllEvenIfDead(nsTArray<ContentParent*>& aArray);
 
+    static void KillAppsForCritialApp();
+
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIOBSERVER
     NS_DECL_NSITHREADOBSERVER

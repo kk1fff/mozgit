@@ -40,6 +40,8 @@
 #include "nsServiceManagerUtils.h"
 #include "nsComponentManagerUtils.h"
 
+#include "mozilla/dom/ContentParent.h"
+
 using namespace mozilla::dom::gonk;
 using namespace android;
 using namespace mozilla::hal;
@@ -525,6 +527,10 @@ AudioManager::SetPhoneState(int32_t aState)
   if (mPhoneAudioAgent) {
     mPhoneAudioAgent->StopPlaying();
     mPhoneAudioAgent = nullptr;
+  }
+
+  if (aState == PHONE_STATE_RINGTONE) {
+    ContentParent::KillAppsForCritialApp();
   }
 
   if (aState == PHONE_STATE_IN_CALL || aState == PHONE_STATE_RINGTONE) {

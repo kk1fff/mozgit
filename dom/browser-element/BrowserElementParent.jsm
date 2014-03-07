@@ -789,7 +789,8 @@ BrowserElementParent.prototype = {
   },
 
   _fireFatalError: function() {
-    let evt = this._createEvent('error', {type: 'fatal'},
+    let evt = this._createEvent('error', {type: 'fatal',
+                                          reason: this._frameLoader.killReason},
                                 /* cancelable = */ false);
     this._frameElement.dispatchEvent(evt);
   },
