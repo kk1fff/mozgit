@@ -137,6 +137,8 @@ using namespace mozilla::system;
 #include "mozilla/dom/SpeechSynthesisParent.h"
 #endif
 
+#include "nsFrameLoader.h"
+
 static NS_DEFINE_CID(kCClipboardCID, NS_CLIPBOARD_CID);
 static const char* sClipboardTextFlavors[] = { kUnicodeMime };
 
@@ -506,6 +508,35 @@ ContentParent::GetInitialProcessPriority(Element* aFrameElement)
     return browserFrame->GetIsExpectingSystemMessage() ?
                PROCESS_PRIORITY_FOREGROUND_HIGH :
                PROCESS_PRIORITY_FOREGROUND;
+}
+
+/*static*/void
+ContentParent::KillAppsForCritialApp()
+{
+    nsTArray<ContentParent*> cp;
+    GetAll(cp);
+
+    for (int i = 0; i < cp.Length(); i++) {
+        ContentParent* p = cp[i];
+        if (!p->IsPreallocated()
+#ifdef MOZ_NUWA_PROCESS
+            && !p->IsNuwaProcess()
+#endif
+        ) {
+            InfallibleTArray<PBrowserParent*> bps;
+            p->ManagedPBrowserParent(bps);
+            for (int i = 0; i < bps.Length(); ++i) {
+                TabParent *tp = static_cast<TabParent*>(bps[i]);
+                nsCOMPtr<nsIFrameLoaderOwner> frameLoaderOwner = do_QueryInterface(tp->GetOwnerElement());
+                nsRefPtr<nsFrameLoader> frameLoader = frameLoaderOwner->GetFrameLoader();
+                if (frameLoader) {
+                    frameLoader->SetKillReason(NS_LITERAL_CSTRING("critical"));
+                }
+            }
+            // kill(p->Pid(), SIGKILL);
+            p->KillHard();
+        }
+    }
 }
 
 bool

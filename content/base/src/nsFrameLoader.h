@@ -462,6 +462,7 @@ private:
 
   // Indicate if we have sent 'remote-browser-frame-pending'.
   bool mPendingFrameSent;
+  nsCString mKillReason;
 };
 
 #endif
