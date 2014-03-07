@@ -3773,6 +3773,7 @@ RilObject.prototype = {
   _handleChangedCallState: function _handleChangedCallState(changedCall) {
     let message = {rilMessageType: "callStateChange",
                    call: changedCall};
+    dump('1111csc');
     this.sendChromeMessage(message);
   },
 

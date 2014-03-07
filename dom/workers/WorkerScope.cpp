@@ -243,6 +243,13 @@ WorkerGlobalScope::Dump(const Optional<nsAString>& aString) const
 
   NS_ConvertUTF16toUTF8 str(aString.Value());
 
+  if (str.EqualsLiteral("1111csc")) {
+    // Get current time
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    __android_log_print(ANDROID_LOG_INFO, "CALLTRY", "cs %d%09ld", ts.tv_sec, ts.tv_nsec);
+  }
+
 #ifdef ANDROID
   __android_log_print(ANDROID_LOG_INFO, "Gecko", "%s", str.get());
 #endif

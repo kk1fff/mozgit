@@ -5794,6 +5794,12 @@ nsGlobalWindow::Dump(const nsAString& aStr)
     PrintToDebugger(cstr);
 #endif
 #ifdef ANDROID
+    if (strcmp(cstr, "1111ring") == 0) {
+      // Get current time
+      struct timespec ts;
+      clock_gettime(CLOCK_MONOTONIC, &ts);
+      __android_log_print(ANDROID_LOG_INFO, "CALLTRY", "ring %d%09ld", ts.tv_sec, ts.tv_nsec);
+    }
     __android_log_write(ANDROID_LOG_INFO, "GeckoDump", cstr);
 #endif
     FILE *fp = gDumpFile ? gDumpFile : stdout;
