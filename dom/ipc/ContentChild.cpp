@@ -1791,3 +1791,9 @@ OnNuwaProcessReady()
 #endif // MOZ_NUWA_PROCESS
 
 }
+
+NS_EXPORT
+void DoGc()
+{
+    mozilla::dom::ContentChild::GetSingleton()->RecvGarbageCollect();
+}
