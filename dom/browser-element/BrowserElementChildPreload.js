@@ -24,7 +24,7 @@ let whitelistedEvents = [
 ];
 
 function debug(msg) {
-  //dump("BrowserElementChildPreload - " + msg + "\n");
+  dump("BrowserElementChildPreload - " + msg + "\n");
 }
 
 function sendAsyncMsg(msg, data) {
@@ -38,6 +38,7 @@ function sendAsyncMsg(msg, data) {
   }
 
   data.msg_name = msg;
+  debug('browser-element-api:call: ' + JSON.stringify(data));
   sendAsyncMessage('browser-element-api:call', data);
 }
 
@@ -535,16 +536,16 @@ BrowserElementChild.prototype = {
   },
 
   _windowCloseHandler: function(e) {
+    debug("Closing window " + win);
     let win = e.target;
     if (win != content || e.defaultPrevented) {
       return;
     }
 
-    debug("Closing window " + win);
     sendAsyncMsg('close');
 
     // Inform the window implementation that we handled this close ourselves.
-    e.preventDefault();
+    // e.preventDefault();
   },
 
   _windowCreatedHandler: function(e) {
