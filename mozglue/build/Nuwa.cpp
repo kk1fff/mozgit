@@ -520,6 +520,30 @@ thread_info_new(void) {
   return tinfo;
 }
 
+static void*
+cleanup_thread_func(void *arg) {
+  thread_info_t *tinfo = (thread_info_t *)arg;
+  void *ret;
+  if (REAL(pthread_join)(tinfo->origThreadID, &ret)) {
+    // Fail to join an closing thread.
+    abort();
+  }
+
+  // Stack of the thread is not using now. Add write permission to guarding page
+  // and free the stack.
+  unsigned long long pageGuard = ((unsigned long long)tinfo->stk);
+  pageGuard &= PAGE_ALIGN_MASK;
+  if (pageGuard != (unsigned long long) tinfo->stk) {
+    pageGuard += PAGE_SIZE;
+  }
+  mprotect((void*)pageGuard, PAGE_SIZE, PROT_READ | PROT_WRITE);
+  free(tinfo->stk);
+
+  delete tinfo;
+
+  return nullptr;
+}
+
 static void
 thread_info_cleanup(void *arg) {
   if (sNuwaForking) {
@@ -538,8 +562,17 @@ thread_info_cleanup(void *arg) {
   pthread_cond_signal(&sThreadChangeCond);
   pthread_mutex_unlock(&sThreadCountLock);
 
-  free(tinfo->stk);
-  delete tinfo;
+  // Create a new thread to clean up thread_info of current thread.
+  // We need a new thread to clean up resource (including stack)
+  // since we will use them until this thread is ended.
+  pthread_t cleanup_thread;
+  if (REAL(pthread_create)(&cleanup_thread,
+                           nullptr,
+                           &cleanup_thread_func,
+                           arg)) {
+    // Unable to create a clean up thread.
+    abort();
+  }
 }
 
 static void *
