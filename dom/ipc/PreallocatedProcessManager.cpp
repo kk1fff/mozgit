@@ -336,6 +336,11 @@ PreallocatedProcessManagerImpl::MaybeForgetSpare(ContentParent* aContent)
   if (aContent == mPreallocatedAppProcess) {
     mPreallocatedAppProcess = nullptr;
     mIsNuwaReady = false;
+    while (mSpareProcesses.Length() > 0){
+      nsRefPtr<ContentParent> process = mSpareProcesses[0];
+      process->Close();
+      mSpareProcesses.RemoveElementAt(0);
+    }
     ScheduleDelayedNuwaFork();
   }
 }
