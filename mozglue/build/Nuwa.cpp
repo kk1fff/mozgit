@@ -23,6 +23,10 @@
 #include <sys/syscall.h>
 #include <vector>
 
+#ifdef ANDROID
+#include <sched.h>
+#endif
+
 #include "mozilla/LinkedList.h"
 #include "Nuwa.h"
 
@@ -50,6 +54,7 @@ int __real_pthread_key_create(pthread_key_t *key, void (*destructor)(void*));
 int __real_pthread_key_delete(pthread_key_t key);
 pthread_t __real_pthread_self();
 int __real_pthread_join(pthread_t thread, void **retval);
+int __real_pthread_detach(pthread_t thread);
 int __real_epoll_wait(int epfd,
                       struct epoll_event *events,
                       int maxevents,
@@ -105,6 +110,13 @@ struct LibcAllocator: public std::allocator<T>
     }
   }
 
+  template <typename U>
+  LibcAllocator(LibcAllocator<U> const& other)
+  {
+    mMallocImpl = other.mMallocImpl;
+    mFreeImpl = other.mFreeImpl;
+  }
+
   inline typename std::allocator<T>::pointer
   allocate(typename std::allocator<T>::size_type n,
            const void * = 0)
@@ -125,6 +137,9 @@ struct LibcAllocator: public std::allocator<T>
     typedef LibcAllocator<U> other;
   };
 private:
+  template<typename U>
+  friend class LibcAllocator;
+
   void* (*mMallocImpl)(size_t);
   void (*mFreeImpl)(void*);
 };
@@ -199,6 +214,9 @@ struct thread_info : public mozilla::LinkedListElement<thread_info> {
   pid_t origNativeThreadID;
   pid_t recreatedNativeThreadID;
   char nativeThreadName[NATIVE_THREAD_NAME_LENGTH];
+  bool joined;
+  bool detached;
+  pthread_mutex_t joinThreadLock;
 };
 
 typedef struct thread_info thread_info_t;
@@ -242,6 +260,11 @@ static std::vector<nuwa_construct_t> sFinalConstructors;
 
 typedef std::map<pthread_key_t, void (*)(void *)> TLSKeySet;
 static TLSKeySet sTLSKeys;
+
+typedef std::map<pthread_t, void*,
+                 std::less<pthread_t>,
+                 LibcAllocator<std::pair<const pthread_key_t, void*> > > ThreadResultMap;
+static ThreadResultMap sThreadResultMap;
 
 /**
  * This mutex is used to block the running threads and freeze their contexts.
@@ -518,6 +541,10 @@ thread_info_new(void) {
   tinfo->recreatedNativeThreadID = 0;
   tinfo->reacquireMutex = nullptr;
   tinfo->stk = malloc(NUWA_STACK_SIZE + getPageSize());
+  tinfo->joined = false;
+  tinfo->detached = false;
+
+  pthread_mutex_init(&tinfo->joinThreadLock, NULL);
 
   // We use a smaller stack size. Add protection to stack overflow: mprotect()
   // stack top (the page at the lowest address) so we crash instead of corrupt
@@ -538,6 +565,7 @@ thread_info_new(void) {
   return tinfo;
 }
 
+// Clean resource of a ended thread.
 static void
 thread_info_cleanup(void *arg) {
   if (sNuwaForking) {
@@ -547,17 +575,88 @@ thread_info_cleanup(void *arg) {
 
   thread_info_t *tinfo = (thread_info_t *)arg;
   pthread_attr_destroy(&tinfo->threadAttr);
+  pthread_mutex_destroy(&tinfo->joinThreadLock);
+
+#ifdef ANDROID
+  // In bionic's implementation, returning from pthread_join() dosen't
+  // mean the thread is "really" ended, we need to check here.
+  pthread_t target_thread = sIsNuwaProcess ? tinfo->origThreadID
+                                           : tinfo->recreatedThreadID;
+  while (!pthread_kill(target_thread, 0)) {
+    sched_yield();
+  }
+#endif
+
+  uintptr_t pageGuard = ceilToPage((uintptr_t)tinfo->stk);
+  mprotect((void*)pageGuard, getPageSize(), PROT_READ | PROT_WRITE);
+  free(tinfo->stk);
 
   REAL(pthread_mutex_lock)(&sThreadCountLock);
   /* unlink tinfo from sAllThreads */
   tinfo->remove();
-
   sThreadCount--;
-  pthread_cond_signal(&sThreadChangeCond);
   pthread_mutex_unlock(&sThreadCountLock);
-
-  free(tinfo->stk);
   delete tinfo;
+  pthread_cond_signal(&sThreadChangeCond);
+}
+
+// The thread function of the thread used to clean a thread.
+static void*
+_thread_cleanup_thread(void* arg) {
+  // sThreadCountLock and tinfo->joinThreadLock should be locked before entering
+  // this function.
+  thread_info_t *tinfo = (thread_info_t *)arg;
+  void *ret = nullptr;
+  int rv;
+  if (sIsNuwaProcess) {
+    REAL(pthread_join)(tinfo->origThreadID, &ret);
+  } else {
+    REAL(pthread_join)(tinfo->recreatedThreadID, &ret);
+  }
+  if (rv) {
+    abort();
+  }
+  if (!tinfo->detached) {
+    sThreadResultMap.insert(std::pair<pthread_t, void*>(tinfo->origThreadID, ret));
+  }
+
+  pthread_mutex_unlock(&tinfo->joinThreadLock);
+  pthread_mutex_unlock(&sThreadCountLock);
+  thread_info_cleanup(tinfo);
+  return nullptr;
+}
+
+static void
+_thread_cleanup(void *arg) {
+  // We are still in the thread that is going to end, so tinfo won't be cleaned
+  // during this function.
+  thread_info_t *tinfo = (thread_info_t *)arg;
+
+  // Lock sThreadCountLock to prevent other thread from joining this thread. If we
+  // lock this later after holding joinThreadLock, it would be a deadlock if other
+  // thread enters wrapped pthread_join.
+  REAL(pthread_mutex_lock)(&sThreadCountLock);
+
+  // If some other thread already joined us, we can simply return and let the
+  // thread clean up our resource. Othrewise, we should create a new thread to
+  // join us and should block any other thread if they try to modify the |joined|
+  // variable.
+  REAL(pthread_mutex_lock)(&tinfo->joinThreadLock);
+  if (tinfo->joined) {
+    pthread_mutex_unlock(&tinfo->joinThreadLock);
+    pthread_mutex_unlock(&sThreadCountLock);
+    return;
+  }
+
+  // Create a thread to join us and clean up the resource for us.
+  // We should:
+  //   1. If pthread_join is invoked, we should block it until the clean-up
+  //      thread end, and let it see this like the thread is ended before it
+  //      started to join, so it will read the result we stored.
+  //   2. Prevent Nuwa from being ready: holding sThreadCountLock.
+  pthread_t cleanup_thread;
+  REAL(pthread_create)(&cleanup_thread, NULL, &_thread_cleanup_thread, tinfo);
+  REAL(pthread_detach)(cleanup_thread);
 }
 
 static void *
@@ -573,7 +672,7 @@ _thread_create_startup(void *arg) {
   tinfo->origThreadID = REAL(pthread_self)();
   tinfo->origNativeThreadID = gettid();
 
-  pthread_cleanup_push(thread_info_cleanup, tinfo);
+  pthread_cleanup_push(_thread_cleanup, tinfo);
 
   r = tinfo->startupFunc(tinfo->startupArg);
 
@@ -584,6 +683,14 @@ _thread_create_startup(void *arg) {
   pthread_cleanup_pop(1);
 
   return r;
+}
+
+// Handle thread cancellation during join.
+static void _clean_thread_join(void *arg) {
+  thread_info_t *tinfo = (thread_info_t *)arg;
+  REAL(pthread_mutex_lock)(&tinfo->joinThreadLock);
+  tinfo->joined = false;
+  pthread_mutex_unlock(&tinfo->joinThreadLock);
 }
 
 // reserve STACK_RESERVED_SZ * 4 bytes for thread_recreate_startup().
@@ -613,7 +720,7 @@ thread_create_startup(void *arg) {
     abort();                    // Did not reserve enough stack space.
   }
 
-  thread_info_t *tinfo = CUR_THREAD_INFO;
+  thread_info_t *tinfo = (thread_info_t *)arg;
   if (!sIsNuwaProcess) {
     longjmp(tinfo->retEnv, 1);
 
@@ -735,12 +842,87 @@ __wrap_pthread_self() {
 
 extern "C" MFBT_API int
 __wrap_pthread_join(pthread_t thread, void **retval) {
-  thread_info_t *tinfo = GetThreadInfo(thread);
+  REAL(pthread_mutex_lock)(&sThreadCountLock);
+
+  // If the result is already in sThreadResultMap, target thread has
+  // already ended, just return the result.
+  ThreadResultMap::iterator result = sThreadResultMap.find(thread);
+  if (result != sThreadResultMap.end()) {
+    *retval = result->second;
+    sThreadResultMap.erase(result);
+    pthread_mutex_unlock(&sThreadCountLock);
+    return 0;
+  }
+
+  thread_info_t *tinfo = GetThreadInfoInner(thread);
   if (tinfo == nullptr) {
+    pthread_mutex_unlock(&sThreadCountLock);
     return REAL(pthread_join)(thread, retval);
   }
-  // pthread_join() need to use the real thread ID in the spawned process.
-  return REAL(pthread_join)(tinfo->recreatedThreadID, retval);
+
+  REAL(pthread_mutex_lock)(&tinfo->joinThreadLock);
+  if (tinfo->joined || tinfo->detached) {
+    // There's another thread joined the thread we are going to join,
+    // return a -1 to indicate error.
+    pthread_mutex_unlock(&tinfo->joinThreadLock);
+    pthread_mutex_unlock(&sThreadCountLock);
+    return -1;
+  }
+
+  // We are going to join the thread now, and we are responible to clean the
+  // resource of that thread.
+  tinfo->joined = true;
+  pthread_mutex_unlock(&tinfo->joinThreadLock);
+  pthread_mutex_unlock(&sThreadCountLock);
+
+  // Clean tinfo->join if the waiting thread is cancelled.
+  pthread_cleanup_push(_clean_thread_join, tinfo);
+  int rv;
+  if (sIsNuwaProcess) {
+    rv = REAL(pthread_join)(tinfo->origThreadID, retval);
+  } else {
+    rv = REAL(pthread_join)(tinfo->recreatedThreadID, retval);
+  }
+  if (rv) {
+    abort();
+  }
+
+  // The target thread has ended. Clean up the resource.
+  // Pop cleanup but don't execute, since we don't want any other join
+  // our target and get a successful return.
+  pthread_cleanup_pop(0);
+  thread_info_cleanup(tinfo);
+  return 0;
+}
+
+extern "C" MFBT_API int
+__wrap_pthread_detach(pthread_t thread) {
+  REAL(pthread_mutex_lock)(&sThreadCountLock);
+  ThreadResultMap::iterator result = sThreadResultMap.find(thread);
+  if (result != sThreadResultMap.end()) {
+    sThreadResultMap.erase(result);
+    pthread_mutex_unlock(&sThreadCountLock);
+    return 0;
+  }
+
+  thread_info_t *tinfo = GetThreadInfoInner(thread);
+  if (tinfo == nullptr) {
+    pthread_mutex_unlock(&sThreadCountLock);
+    return REAL(pthread_detach)(thread);
+  }
+
+  REAL(pthread_mutex_lock)(&tinfo->joinThreadLock);
+  if (tinfo->joined || tinfo->detached) {
+    // There's another thread joined the thread we are going to join,
+    // return a -1 to indicate error.
+    pthread_mutex_unlock(&tinfo->joinThreadLock);
+    pthread_mutex_unlock(&sThreadCountLock);
+    return -1;
+  }
+  tinfo->detached = true;
+  pthread_mutex_unlock(&tinfo->joinThreadLock);
+  pthread_mutex_unlock(&sThreadCountLock);
+  return 0;
 }
 
 /**
