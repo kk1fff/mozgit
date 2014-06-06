@@ -1,0 +1,7 @@
+#include "nsISupports.idl"
+
+[scriptable, uuid(b9d16aee-065e-4d69-8c5b-de5c4e60210d)]
+interface nsIThreadStatusListener : nsISupports
+{
+  void onAllThreadIdle();
+};

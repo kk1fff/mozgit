@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #endif
+#include <sys/types.h>
 
 using namespace mozilla;
 
@@ -47,12 +48,55 @@ NS_SetMainThread()
 
 typedef nsTArray<nsRefPtr<nsThread>> nsThreadArray;
 
+class NotifyAllThreadsHasIdled: public nsRunnable
+{
+public:
+
+  NotifyAllThreadsHasIdled(
+    nsTArray<nsRefPtr<nsThreadManager::AllThreadHadIdledListener>>* aListeners)
+    : mListeners(aListeners)
+  {
+  }
+
+  virtual NS_IMETHODIMP
+  Run() {
+    // Copy listener array, which may be modified during call back.
+    nsTArray<nsRefPtr<nsThreadManager::AllThreadHadIdledListener>> arr(*mListeners);
+    for (int i = 0; i < arr.Length(); i++) {
+      arr[i]->OnAllThreadHadIdled();
+    }
+    return NS_OK;
+  }
+
+private:
+  // Raw pointer, since its member object of thread manager.
+  nsTArray<nsRefPtr<nsThreadManager::AllThreadHadIdledListener>>* mListeners;
+};
+
+struct nsThreadManager::ThreadStatusInfo {
+  bool mWorking;
+  bool mWillBeWorking;
+  bool mIgnored;
+  ThreadStatusInfo()
+    : mWorking(false)
+    , mWillBeWorking(false)
+    , mIgnored(false)
+  {
+  }
+};
+
 //-----------------------------------------------------------------------------
 
 static void
 ReleaseObject(void* aData)
 {
   static_cast<nsISupports*>(aData)->Release();
+}
+
+static void
+DeleteThreadStatusInfo(void* aData)
+{
+  delete static_cast<nsThreadManager::ThreadStatusInfo*>(aData);
 }
 
 static PLDHashOperator
@@ -96,7 +140,13 @@ nsThreadManager::Init()
     return NS_ERROR_FAILURE;
   }
 
+  if (PR_NewThreadPrivateIndex(&mThreadStatusInfoIndex,
+                               DeleteThreadStatusInfo) == PR_FAILURE) {
+    return NS_ERROR_FAILURE;
+  }
+
   mLock = new Mutex("nsThreadManager.mLock");
+  mMonitor = new ReentrantMonitor("nsThreadManager.mMonitor");
 
 #ifdef MOZ_CANARY
   const int flags = O_WRONLY | O_APPEND | O_CREAT | O_NONBLOCK;
@@ -194,6 +244,8 @@ nsThreadManager::Shutdown()
 
   // Remove the TLS entry for the main thread.
   PR_SetThreadPrivate(mCurThreadIndex, nullptr);
+  mThreadStatusInfos.RemoveElement(GetCurrentThreadStatusInfo());
+  PR_SetThreadPrivate(mThreadStatusInfoIndex, nullptr);
 }
 
 void
@@ -226,6 +278,8 @@ nsThreadManager::UnregisterCurrentThread(nsThread* aThread)
 
   PR_SetThreadPrivate(mCurThreadIndex, nullptr);
   // Ref-count balanced via ReleaseObject
+  mThreadStatusInfos.RemoveElement(GetCurrentThreadStatusInfo());
+  PR_SetThreadPrivate(mThreadStatusInfoIndex, nullptr);
 }
 
 nsThread*
@@ -248,6 +302,20 @@ nsThreadManager::GetCurrentThread()
   }
 
   return thread.get();  // reference held in TLS
+}
+
+nsThreadManager::ThreadStatusInfo*
+nsThreadManager::GetCurrentThreadStatusInfo()
+{
+  void* data = PR_GetThreadPrivate(mThreadStatusInfoIndex);
+  if (!data) {
+    ThreadStatusInfo *thrInfo = new ThreadStatusInfo();
+    PR_SetThreadPrivate(mThreadStatusInfoIndex, thrInfo);
+    mThreadStatusInfos.AppendElement(thrInfo);
+    data = thrInfo;
+  }
+
+  return static_cast<ThreadStatusInfo*>(data);
 }
 
 NS_IMETHODIMP
@@ -341,4 +409,85 @@ nsThreadManager::GetHighestNumberOfThreads()
 {
   MutexAutoLock lock(*mLock);
   return mHighestNumberOfThreads;
+}
+
+void
+nsThreadManager::SetIgnoreThreadStatus(bool aIgnored)
+{
+  GetCurrentThreadStatusInfo()->mIgnored = aIgnored;
+}
+
+void
+nsThreadManager::SetThreadIdle()
+{
+  SetThreadStatus(false);
+}
+
+void
+nsThreadManager::SetThreadWorking()
+{
+  SetThreadStatus(true);
+}
+
+void
+nsThreadManager::AddAllThreadHadIdledListener(AllThreadHadIdledListener *listener)
+{
+  mThreadsIdledListener.AppendElement(listener);
+}
+
+void
+nsThreadManager::RemoveAllThreadHadIdledListener(AllThreadHadIdledListener *listener)
+{
+  mThreadsIdledListener.RemoveElement(listener);
+}
+
+void
+nsThreadManager::SetThreadStatus(bool isWorking)
+{
+  ThreadStatusInfo *currInfo = GetCurrentThreadStatusInfo();
+  currInfo->mWillBeWorking = isWorking;
+  if (mThreadsIdledListener.Length() > 0) {
+    // If there's a listener, we update our status and check statuses of threads
+    // after holding a lock.
+    // There may be threads that checked |mThreadsIdledListener| before a
+    // listener is put into it and then is context switched. In this case, we
+    // might get the value before updated and the thread won't check again after
+    // update to value.
+    // a. If it goes from idle to working, we'll get incorrect idle status since
+    //    there's actually something in its queue. However, having not finished
+    //    the function means the thread that dispatches this task is still
+    //    marked as working, and that will prevent us from firing an event.
+    // b. If it goes from working to idle, we will get in incorrect working
+    //    status. We could miss a chance to notify listeners if we are going to
+    //    set current thread to idle. This can be addressed by storing status
+    //    that is going to be set to |mWorking| to |mWillBeWorking|. If
+    //    |mWillBeWorking| is false while |mWorking| is true, meaning the thread
+    //    is becoming idle. Then we can treat the thread as an idle thread.
+    //    We don't know if it will check threads, so we can just fire the event.
+    //    And once we fired an event to main thread.
+    bool hasWorkingThread = false;
+    ReentrantMonitorAutoEnter mon(*mMonitor);
+    // Get data structure of thread info.
+    currInfo->mWorking = isWorking;
+    for (int i = 0; i < mThreadStatusInfos.Length(); i++) {
+      ThreadStatusInfo *info = mThreadStatusInfos[i];
+      if (!info->mIgnored) {
+        if (info->mWorking) {
+          // Make sure it is not being updated.
+          if (!info->mWillBeWorking) {
+            hasWorkingThread = true;
+            break;
+          }
+        }
+      }
+    }
+    if (!hasWorkingThread) {
+      nsRefPtr<NotifyAllThreadsHasIdled> runnable =
+        new NotifyAllThreadsHasIdled(&mThreadsIdledListener);
+      NS_DispatchToMainThread(runnable);
+    }
+  } else {
+    // Update thread info without holding any lock.
+    currInfo->mWorking = isWorking;
+  }
 }

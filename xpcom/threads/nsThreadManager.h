@@ -8,6 +8,7 @@
 #define nsThreadManager_h__
 
 #include "mozilla/Mutex.h"
+#include "mozilla/ReentrantMonitor.h"
 #include "nsIThreadManager.h"
 #include "nsRefPtrHashtable.h"
 #include "nsThread.h"
@@ -17,6 +18,17 @@ class nsIRunnable;
 class nsThreadManager : public nsIThreadManager
 {
 public:
+  struct ThreadStatusInfo;
+  class AllThreadHadIdledListener {
+  public:
+    NS_INLINE_DECL_REFCOUNTING(AllThreadHadIdledListener);
+    virtual void OnAllThreadHadIdled() = 0;
+  protected:
+    virtual ~AllThreadHadIdledListener()
+    {
+    }
+  };
+
   NS_DECL_ISUPPORTS
   NS_DECL_NSITHREADMANAGER
 
@@ -54,6 +66,13 @@ public:
   {
   }
 
+  void SetIgnoreThreadStatus(bool aIgnored);
+  void SetThreadIdle();
+  void SetThreadWorking();
+
+  void AddAllThreadHadIdledListener(AllThreadHadIdledListener *listener);
+  void RemoveAllThreadHadIdledListener(AllThreadHadIdledListener *listener);
+
 private:
   nsThreadManager()
     : mCurThreadIndex(0)
@@ -62,8 +81,13 @@ private:
     , mInitialized(false)
     , mCurrentNumberOfThreads(1)
     , mHighestNumberOfThreads(1)
+    , mMonitor(nullptr)
   {
   }
+
+  ThreadStatusInfo* GetCurrentThreadStatusInfo();
+
+  void SetThreadStatus(bool isWorking);
 
   nsRefPtrHashtable<nsPtrHashKey<PRThread>, nsThread> mThreadsByPRThread;
   unsigned             mCurThreadIndex;  // thread-local-storage index
@@ -78,6 +102,11 @@ private:
   uint32_t            mCurrentNumberOfThreads;
   // The highest number of threads encountered so far during the session
   uint32_t            mHighestNumberOfThreads;
+
+  unsigned            mThreadStatusInfoIndex;
+  nsTArray<nsRefPtr<AllThreadHadIdledListener>> mThreadsIdledListener;
+  nsTArray<ThreadStatusInfo*> mThreadStatusInfos;
+  nsAutoPtr<mozilla::ReentrantMonitor> mMonitor;
 };
 
 #define NS_THREADMANAGER_CID                       \

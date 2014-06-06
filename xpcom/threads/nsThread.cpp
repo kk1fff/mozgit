@@ -29,6 +29,7 @@
 #include "mozilla/Services.h"
 #include "nsXPCOMPrivate.h"
 #include "mozilla/ChaosMode.h"
+#include "nsThreadStatusManager.h"
 
 #ifdef MOZ_CRASHREPORTER
 #include "nsServiceManagerUtils.h"
@@ -332,6 +333,8 @@ nsThread::ThreadFunc(void* aArg)
 
   mozilla::IOInterposer::RegisterCurrentThread();
 
+  nsThreadStatusManager::get()->OnThreadCreated(self);
+
   // Wait for and process startup event
   nsCOMPtr<nsIRunnable> event;
   if (!self->GetEvent(true, getter_AddRefs(event))) {
@@ -369,6 +372,8 @@ nsThread::ThreadFunc(void* aArg)
       NS_ProcessPendingEvents(self);
     }
   }
+
+  nsThreadStatusManager::get()->OnThreadExit(self);
 
   mozilla::IOInterposer::UnregisterCurrentThread();
 
@@ -480,6 +485,7 @@ nsThread::InitCurrentThread()
   mThread = PR_GetCurrentThread();
   SetupCurrentThreadForChaosMode();
 
+  nsThreadStatusManager::get()->OnThreadCreated(this);
   nsThreadManager::get()->RegisterCurrentThread(this);
   return NS_OK;
 }
