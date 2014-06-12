@@ -556,6 +556,10 @@ nsTimerImpl::Fire()
     return;
   }
 
+  if (IsNuwaProcess() && IsNuwaReady()) {
+    return;
+  }
+
   PROFILER_LABEL("Timer", "Fire",
                  js::ProfileEntry::Category::OTHER);
 

@@ -631,6 +631,8 @@ private:
 
     virtual bool RecvNuwaReady() MOZ_OVERRIDE;
 
+    virtual bool RecvNuwaWaiting() MOZ_OVERRIDE;
+
     virtual bool RecvAddNewProcess(const uint32_t& aPid,
                                    const InfallibleTArray<ProtocolFdMapping>& aFds) MOZ_OVERRIDE;
 

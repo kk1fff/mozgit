@@ -539,6 +539,9 @@ ContentChild::ContentChild()
 #endif
    , mCanOverrideProcessName(true)
    , mIsAlive(true)
+#ifdef MOZ_NUWA_PROCESS
+   , mDontFlushMemory(false)
+#endif
 {
     // This process is a content process, so it's clearly running in
     // multiprocess mode!
@@ -576,6 +579,9 @@ ContentChild::Init(MessageLoop* aIOLoop,
 
 #ifdef MOZ_NUWA_PROCESS
     SetTransport(aChannel);
+    if (IsNuwaProcess()) {
+        mDontFlushMemory = true;
+    }
 #endif
 
     NS_ASSERTION(!sSingleton, "only one ContentChild per child");
@@ -1152,6 +1158,9 @@ ContentChild::RecvPBrowserConstructor(PBrowserChild* aActor,
 {
     // This runs after AllocPBrowserChild() returns and the IPC machinery for this
     // PBrowserChild has been set up.
+#ifdef MOZ_NUWA_PROCESS
+    mDontFlushMemory = false;
+#endif
 
     nsCOMPtr<nsIObserverService> os = services::GetObserverService();
     if (os) {
@@ -1875,6 +1884,9 @@ ContentChild::RecvFlushMemory(const nsString& reason)
         // Don't flush memory in the nuwa process: the GC thread could be frozen.
         return true;
     }
+    if (mDontFlushMemory) {
+        return true;
+    }
 #endif
     nsCOMPtr<nsIObserverService> os =
         mozilla::services::GetObserverService();
@@ -1960,10 +1972,14 @@ ContentChild::RecvAppInfo(const nsCString& version, const nsCString& buildID,
     // BrowserElementChild.js.
     if ((mIsForApp || mIsForBrowser)
 #ifdef MOZ_NUWA_PROCESS
-        && !IsNuwaProcess()
+        && IsNuwaProcess()
 #endif
        ) {
         PreloadSlowThings();
+    }
+
+    if (IsNuwaProcess()) {
+        SendNuwaWaiting();
     }
 
     if (!IsNuwaProcess()) {
@@ -1979,6 +1995,12 @@ ContentChild::RecvAppInfo(const nsCString& version, const nsCString& buildID,
                ts_now.tv_nsec - ts_fork.tv_nsec);
     }
 
+    return true;
+}
+
+bool
+ContentChild::RecvNuwaCanFreeze()
+{
 #ifdef MOZ_NUWA_PROCESS
     if (IsNuwaProcess()) {
         ContentChild::GetSingleton()->RecvGarbageCollect();
@@ -1986,7 +2008,6 @@ ContentChild::RecvAppInfo(const nsCString& version, const nsCString& buildID,
             FROM_HERE, NewRunnableFunction(OnFinishNuwaPreparation));
     }
 #endif
-
     return true;
 }
 

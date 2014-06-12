@@ -116,6 +116,7 @@
 #include "nsServiceManagerUtils.h"
 #include "nsStyleSheetService.h"
 #include "nsThreadUtils.h"
+#include "nsThreadManager.h"
 #include "nsToolkitCompsCID.h"
 #include "nsWidgetsCID.h"
 #include "PreallocatedProcessManager.h"
@@ -1320,6 +1321,24 @@ StaticAutoPtr<LinkedList<SystemMessageHandledListener> >
 NS_IMPL_ISUPPORTS(SystemMessageHandledListener,
                   nsITimerCallback)
 
+class NuwaListener : public nsThreadManager::AllThreadHadIdledListener
+{
+public:
+    NuwaListener(ContentParent* parent):
+        mParent(parent) {
+    }
+
+    void OnAllThreadHadIdled()
+    {
+        unused << mParent->SendNuwaCanFreeze();
+        nsThreadManager::get()->RemoveAllThreadHadIdledListener(this);
+    }
+private:
+    ContentParent *mParent;
+    virtual ~NuwaListener() {
+    }
+};
+
 } // anonymous namespace
 
 void
@@ -2492,6 +2511,14 @@ ContentParent::RecvNuwaReady()
     NS_ERROR("ContentParent::RecvNuwaReady() not implemented!");
     return false;
 #endif
+}
+
+bool
+ContentParent::RecvNuwaWaiting()
+{
+    nsRefPtr<NuwaListener> listener = new NuwaListener(this);
+    nsThreadManager::get()->AddAllThreadHadIdledListener(listener);
+    return true;
 }
 
 bool

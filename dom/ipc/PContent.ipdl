@@ -497,6 +497,7 @@ child:
      */
     OnAppThemeChanged();
 
+    NuwaCanFreeze();
 parent:
     /**
      * Tell the parent process a new accessible document has been created.
@@ -681,6 +682,7 @@ parent:
     async SystemMessageHandled();
 
     NuwaReady();
+    NuwaWaiting();
 
     sync AddNewProcess(uint32_t pid, ProtocolFdMapping[] aFds);
 
