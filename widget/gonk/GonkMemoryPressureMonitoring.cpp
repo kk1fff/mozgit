@@ -15,6 +15,7 @@
 #include "nsIObserverService.h"
 #include "nsMemoryPressure.h"
 #include "nsThreadUtils.h"
+#include "nsThreadManager.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -126,6 +127,8 @@ public:
       NuwaMarkCurrentThread(nullptr, nullptr);
     }
 #endif
+
+    nsThreadManager::get()->SetIgnoreThreadStatus(true);
 
     int lowMemFd = open("/sys/kernel/mm/lowmemkiller/notify_trigger_active",
                         O_RDONLY | O_CLOEXEC);

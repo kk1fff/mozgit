@@ -29,7 +29,6 @@
 #include "mozilla/Services.h"
 #include "nsXPCOMPrivate.h"
 #include "mozilla/ChaosMode.h"
-#include "nsThreadStatusManager.h"
 
 #ifdef MOZ_CRASHREPORTER
 #include "nsServiceManagerUtils.h"
@@ -333,8 +332,6 @@ nsThread::ThreadFunc(void* aArg)
 
   mozilla::IOInterposer::RegisterCurrentThread();
 
-  nsThreadStatusManager::get()->OnThreadCreated(self);
-
   // Wait for and process startup event
   nsCOMPtr<nsIRunnable> event;
   if (!self->GetEvent(true, getter_AddRefs(event))) {
@@ -372,8 +369,6 @@ nsThread::ThreadFunc(void* aArg)
       NS_ProcessPendingEvents(self);
     }
   }
-
-  nsThreadStatusManager::get()->OnThreadExit(self);
 
   mozilla::IOInterposer::UnregisterCurrentThread();
 
@@ -485,7 +480,6 @@ nsThread::InitCurrentThread()
   mThread = PR_GetCurrentThread();
   SetupCurrentThreadForChaosMode();
 
-  nsThreadStatusManager::get()->OnThreadCreated(this);
   nsThreadManager::get()->RegisterCurrentThread(this);
   return NS_OK;
 }
@@ -833,6 +827,7 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
       if (MAIN_THREAD == mIsMainThread) {
         HangMonitor::NotifyActivity();
       }
+      nsThreadManager::get()->SetThreadWorking();
       event->Run();
     } else if (aMayWait) {
       MOZ_ASSERT(ShuttingDown(),
@@ -842,6 +837,10 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
   }
 
   --mRunningEvent;
+
+  if ((!mEvents->GetEvent(false, nullptr)) && (mRunningEvent == 0)) {
+    nsThreadManager::get()->SetThreadIdle();
+  }
 
   NOTIFY_EVENT_OBSERVERS(AfterProcessNextEvent,
                          (this, mRunningEvent, *aResult));

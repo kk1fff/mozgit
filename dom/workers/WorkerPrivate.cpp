@@ -85,6 +85,7 @@
 #include "WorkerFeature.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
+#include "nsThreadManager.h"
 
 // JS_MaybeGC will run once every second during normal execution.
 #define PERIODIC_GC_TIMER_DELAY_SEC 1
@@ -4039,8 +4040,10 @@ WorkerPrivate::DoRunLoop(JSContext* aCx)
 
       while (mControlQueue.IsEmpty() &&
              !(normalRunnablesPending = NS_HasPendingEvents(mThread))) {
+        nsThreadManager::get()->SetThreadIdle();
         WaitForWorkerEvents();
       }
+      nsThreadManager::get()->SetThreadWorking();
 
       ProcessAllControlRunnablesLocked();
 
@@ -4867,8 +4870,10 @@ WorkerPrivate::RunCurrentSyncLoop()
         while (mControlQueue.IsEmpty() &&
                !normalRunnablesPending &&
                !(normalRunnablesPending = NS_HasPendingEvents(thread))) {
+          nsThreadManager::get()->SetThreadIdle();
           WaitForWorkerEvents();
         }
+        nsThreadManager::get()->SetThreadWorking();
 
         ProcessAllControlRunnablesLocked();
 

@@ -150,7 +150,6 @@ NS_IMETHODIMP
 nsThreadPool::Run()
 {
   LOG(("THRD-P(%p) enter\n", this));
-
   mThreadNaming.SetThreadPoolName(mName);
 
   nsCOMPtr<nsIThread> current;
@@ -208,6 +207,7 @@ nsThreadPool::Run()
         } else {
           PRIntervalTime delta = timeout - (now - idleSince);
           LOG(("THRD-P(%p) waiting [%d]\n", this, delta));
+          nsThreadManager::get()->SetThreadIdle();
           mon.Wait(delta);
         }
       } else if (wasIdle) {
@@ -217,6 +217,7 @@ nsThreadPool::Run()
     }
     if (event) {
       LOG(("THRD-P(%p) running [%p]\n", this, event.get()));
+      nsThreadManager::get()->SetThreadWorking();
       event->Run();
     }
   } while (!exitThread);

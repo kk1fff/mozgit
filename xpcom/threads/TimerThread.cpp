@@ -16,6 +16,7 @@
 #include "mozilla/ChaosMode.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/BinarySearch.h"
+#include "nsThreadManager.h"
 
 #include <math.h>
 
@@ -206,6 +207,8 @@ TimerThread::Run()
     NuwaMarkCurrentThread(nullptr, nullptr);
   }
 #endif
+
+  nsThreadManager::get()->SetIgnoreThreadStatus(true);
 
   MonitorAutoLock lock(mMonitor);
 

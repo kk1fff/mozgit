@@ -16,6 +16,7 @@
 #include "nsISupportsPriority.h"
 #include "nsIThreadPool.h"
 #include "nsThreadUtils.h"
+#include "nsThreadManager.h"
 #include "nsServiceManagerUtils.h"
 #include "nsXPCOMCIDInternal.h"
 #include "ProfilerHelpers.h"
@@ -856,10 +857,12 @@ TransactionThreadPool::TransactionQueue::Run()
     {
       MonitorAutoLock lock(mMonitor);
       while (!mShouldFinish && mQueue.IsEmpty()) {
+        nsThreadManager::get()->SetThreadIdle();
         if (NS_FAILED(mMonitor.Wait())) {
           NS_ERROR("Failed to wait!");
         }
       }
+      nsThreadManager::get()->SetThreadWorking();
 
       mQueue.SwapElements(queue);
       if (mShouldFinish) {

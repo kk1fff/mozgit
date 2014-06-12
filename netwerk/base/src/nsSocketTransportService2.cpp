@@ -22,6 +22,9 @@
 #include "nsThreadUtils.h"
 #include "nsIFile.h"
 
+#include "nsThreadManager.h"
+#include "nsThread.h"
+
 using namespace mozilla;
 using namespace mozilla::net;
 
@@ -728,9 +731,16 @@ nsSocketTransportService::Run()
         thread->HasPendingEvents(&pendingEvents);
 
         do {
+          // Mark current thread empty when there's no pending events
+          // and we are going to poll.
+          if (!pendingEvents) {
+            nsThreadManager::get()->SetThreadIdle();
+          }
+
             // If there are pending events for this thread then
             // DoPollIteration() should service the network without blocking.
             DoPollIteration(!pendingEvents);
+            nsThreadManager::get()->SetThreadWorking();
             
             // If nothing was pending before the poll, it might be now
             if (!pendingEvents)

@@ -9,6 +9,7 @@
 #include "mozilla/dom/ToJSValue.h"
 #include "nsXULAppAPI.h"
 #include "WifiUtils.h"
+#include "nsThreadManager.h"
 
 #ifdef MOZ_TASK_TRACER
 #include "GeckoTaskTracer.h"
@@ -66,6 +67,7 @@ public:
   {
     MOZ_ASSERT(!NS_IsMainThread());
     nsAutoString event;
+    nsThreadManager::get()->SetThreadIdle();
     gWpaSupplicant->WaitForEvent(event, mInterface);
     if (!event.IsEmpty()) {
 #ifdef MOZ_TASK_TRACER
@@ -74,6 +76,7 @@ public:
       AutoSourceEvent taskTracerEvent(SourceEventType::WIFI);
       AddLabel("%s %s", mInterface.get(), NS_ConvertUTF16toUTF8(event).get());
 #endif
+      nsThreadManager::get()->SetThreadWorking();
       nsCOMPtr<nsIRunnable> runnable = new WifiEventDispatcher(event, mInterface);
       NS_DispatchToMainThread(runnable);
     }
