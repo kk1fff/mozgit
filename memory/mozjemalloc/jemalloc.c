@@ -393,6 +393,12 @@ __FBSDID("$FreeBSD: head/lib/libc/stdlib/malloc.c 180599 2008-07-18 19:35:44Z ja
 #include "linkedlist.h"
 #include "mozmemory_wrap.h"
 
+#ifdef MOZ_NUWA_PROCESS
+#pragma GCC visibility push(default)
+int __real_pthread_mutex_lock(pthread_mutex_t *mtx);
+#pragma GCC visibility pop
+#endif
+
 /* Some tools, such as /dev/dsp wrappers, LD_PRELOAD libraries that
  * happen to override mmap() and call dlsym() from their overridden
  * mmap(). The problem is that dlsym() calls malloc(), and this ends
@@ -1627,7 +1633,11 @@ malloc_mutex_lock(malloc_mutex_t *mutex)
 #elif defined(MOZ_MEMORY_DARWIN)
 	OSSpinLockLock(&mutex->lock);
 #elif defined(MOZ_MEMORY)
+#ifdef MOZ_NUWA_PROCESS
+	__real_pthread_mutex_lock(mutex);
+#else
 	pthread_mutex_lock(mutex);
+#endif
 #else
 	if (isthreaded)
 		_SPINLOCK(&mutex->lock);
@@ -1687,7 +1697,11 @@ malloc_spin_lock(malloc_spinlock_t *lock)
 #elif defined(MOZ_MEMORY_DARWIN)
 	OSSpinLockLock(&lock->lock);
 #elif defined(MOZ_MEMORY)
+#ifdef MOZ_NUWA_PROCESS
+	__real_pthread_mutex_lock(lock);
+#else
 	pthread_mutex_lock(lock);
+#endif
 #else
 	if (isthreaded)
 		_SPINLOCK(&lock->lock);
