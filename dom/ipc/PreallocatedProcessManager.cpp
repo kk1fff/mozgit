@@ -177,6 +177,7 @@ PreallocatedProcessManagerImpl::Enable()
   if (mEnabled) {
     return;
   }
+  printf_stderr("TEST: PreallocatedProcessManagerImpl::Enable()");
 
   mEnabled = true;
 #ifdef MOZ_NUWA_PROCESS
@@ -392,6 +393,8 @@ PreallocatedProcessManagerImpl::Disable()
     return;
   }
 
+  printf_stderr("TEST: PreallocatedProcessManagerImpl::Disable()");
+
   mEnabled = false;
 
 #ifdef MOZ_NUWA_PROCESS
@@ -411,7 +414,7 @@ PreallocatedProcessManagerImpl::Disable()
     }
     mIsNuwaReady = false;
 #endif
-    mPreallocatedAppProcess->Close();
+    mPreallocatedAppProcess->KillHard();
     mPreallocatedAppProcess = nullptr;
   }
 }

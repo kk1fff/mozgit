@@ -55,8 +55,6 @@ setPref('dom.ipc.processPrelaunch.testMode', true);  // For testing deadlock.
 
 function runTest()
 {
-  // Shutdown preallocated process.
-  SpecialPowers.setBoolPref('dom.ipc.processPrelaunch.enabled', false);
   let cpmm = SpecialPowers.Cc["@mozilla.org/childprocessmessagemanager;1"]
                           .getService(SpecialPowers.Ci.nsISyncMessageSender);
   let seenNuwaReady = false;
@@ -95,7 +93,14 @@ function runTest()
   SpecialPowers.setBoolPref('dom.ipc.processPrelaunch.enabled', true);
 }
 
-testLoader.onTestReady = runTest;
+function prepareTest() {
+  // Shutdown preallocated process.
+  SpecialPowers.pushPrefEnv({
+    'set': [['dom.ipc.processPrelaunch.enabled', false]]
+  }, runTest);
+}
+
+testLoader.onTestReady = prepareTest;
 </script>
 </body>
 </html>
