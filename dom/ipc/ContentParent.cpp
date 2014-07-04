@@ -854,10 +854,18 @@ static GrandchildMap sGrandchildProcessMap;
 std::map<uint64_t, ContentParent*> sContentParentMap;
 
 void
-ContentParent::RunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
+ContentParent::AddRunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
 {
 #ifdef MOZ_NUWA_PROCESS
-    PreallocatedProcessManager::RunAfterPreallocatedProcessReady(aRequest);
+    PreallocatedProcessManager::AddRunAfterPreallocatedProcessReady(aRequest);
+#endif
+}
+
+void
+ContentParent::RemoveRunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
+{
+#ifdef MOZ_NUWA_PROCESS
+    PreallocatedProcessManager::RemoveRunAfterPreallocatedProcessReady(aRequest);
 #endif
 }
 

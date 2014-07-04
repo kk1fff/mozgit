@@ -362,8 +362,14 @@ nsFrameLoader::ReallyStartLoadingInternal()
       if (Preferences::GetBool("dom.ipc.processPrelaunch.enabled", false) &&
           !ContentParent::PreallocatedProcessReady()) {
 
-        ContentParent::RunAfterPreallocatedProcessReady(
-            new DelayedStartLoadingRunnable(this));
+        if (mDelayedStartLoadingRunnable) {
+          ContentParent::RemoveRunAfterPreallocatedProcessReady(mDelayedStartLoadingRunnable.get());
+          mDelayedStartLoadingRunnable = nullptr;
+        }
+
+        mDelayedStartLoadingRunnable = new DelayedStartLoadingRunnable(this);
+        ContentParent::AddRunAfterPreallocatedProcessReady(
+          mDelayedStartLoadingRunnable.get());
         return NS_ERROR_FAILURE;
       }
 
