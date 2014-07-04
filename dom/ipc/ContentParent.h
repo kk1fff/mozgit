@@ -106,7 +106,8 @@ public:
     static void JoinAllSubprocesses();
 
     static bool PreallocatedProcessReady();
-    static void RunAfterPreallocatedProcessReady(nsIRunnable* aRequest);
+    static void AddRunAfterPreallocatedProcessReady(nsIRunnable* aRequest);
+    static void RemoveRunAfterPreallocatedProcessReady(nsIRunnable* aRequest);
 
     /**
      * Get or create a content process for:

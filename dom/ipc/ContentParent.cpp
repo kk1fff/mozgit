@@ -854,10 +854,18 @@ ContentParent::PreallocatedProcessReady()
 }
 
 void
-ContentParent::RunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
+ContentParent::AddRunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
 {
 #ifdef MOZ_NUWA_PROCESS
-    PreallocatedProcessManager::RunAfterPreallocatedProcessReady(aRequest);
+    PreallocatedProcessManager::AddRunAfterPreallocatedProcessReady(aRequest);
+#endif
+}
+
+void
+ContentParent::RemoveRunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
+{
+#ifdef MOZ_NUWA_PROCESS
+    PreallocatedProcessManager::RemoveRunAfterPreallocatedProcessReady(aRequest);
 #endif
 }
 

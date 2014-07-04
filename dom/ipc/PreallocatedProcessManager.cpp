@@ -58,7 +58,8 @@ public:
   void OnNuwaReady();
   bool PreallocatedProcessReady();
   already_AddRefed<ContentParent> GetSpareProcess();
-  void RunAfterPreallocatedProcessReady(nsIRunnable* aRunnable);
+  void AddRunAfterPreallocatedProcessReady(nsIRunnable* aRunnable);
+  void RemoveRunAfterPreallocatedProcessReady(nsIRunnable* aRunnable);
   void MaybeRunNextForkRequest();
 
 private:
@@ -258,7 +259,7 @@ PreallocatedProcessManagerImpl::MaybeRunNextForkRequest()
 }
 
 void
-PreallocatedProcessManagerImpl::RunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
+PreallocatedProcessManagerImpl::AddRunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
 {
   MOZ_ASSERT(NS_IsMainThread());
   nsRefPtr<RunAfterPreallocatedProcessReadyRunnable> runnable =
@@ -267,6 +268,13 @@ PreallocatedProcessManagerImpl::RunAfterPreallocatedProcessReady(nsIRunnable* aR
 
   // This is an urgent NuwaFork() request. Request to fork at once.
   DelayedNuwaFork();
+}
+
+void
+PreallocatedProcessManagerImpl::RemoveRunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mDelayedContentParentRequests.RemoveElement(aRequest);
 }
 
 void
@@ -543,9 +551,15 @@ PreallocatedProcessManager::PreallocatedProcessReady()
 }
 
 /* static */ void
-PreallocatedProcessManager::RunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
+PreallocatedProcessManager::AddRunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
 {
-  GetPPMImpl()->RunAfterPreallocatedProcessReady(aRequest);
+  GetPPMImpl()->AddRunAfterPreallocatedProcessReady(aRequest);
+}
+
+/* static */ void
+PreallocatedProcessManager::RemoveRunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
+{
+  GetPPMImpl()->RemoveRunAfterPreallocatedProcessReady(aRequest);
 }
 
 #endif
