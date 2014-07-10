@@ -2286,6 +2286,24 @@ ContentChild::RecvOnAppThemeChanged()
     return true;
 }
 
+static void
+PreloadSlowThings2()
+{
+    TabChild::PreloadSlowThings2();
+}
+
+bool
+ContentChild::RecvNuwaForkDone()
+{
+#ifdef MOZ_NUWA_PROCESS
+    PreloadSlowThings2();
+    return true;
+#else
+    return false; // Makes the underlying IPC channel abort.
+#endif
+}
+
+
 } // namespace dom
 } // namespace mozilla
 

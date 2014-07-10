@@ -328,6 +328,8 @@ public:
 
     virtual bool RecvNuwaFork() MOZ_OVERRIDE;
 
+    virtual bool RecvNuwaForkDone() MOZ_OVERRIDE;
+
     virtual bool
     RecvNotifyProcessPriorityChanged(const hal::ProcessPriority& aPriority) MOZ_OVERRIDE;
     virtual bool RecvMinimizeMemoryUsage() MOZ_OVERRIDE;

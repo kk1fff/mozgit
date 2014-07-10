@@ -2579,6 +2579,9 @@ ContentParent::RecvAddNewProcess(const uint32_t& aPid,
                !clipboardCaps.supportsFindClipboard(),
                "Unexpected values");
 
+    // Inform child process to reinitialize module if necessary.
+    content->SendNuwaForkDone();
+
     PreallocatedProcessManager::PublishSpareProcess(content);
     return true;
 #else

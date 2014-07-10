@@ -778,6 +778,17 @@ TabChild::PreloadSlowThings()
     ClearOnShutdown(&sPreallocatedTab);
 }
 
+/*static*/ void
+TabChild::PreloadSlowThings2()
+{
+    MOZ_ASSERT(sPreallocatedTab);
+
+    // Rebuild connections to parent.
+    sPreallocatedTab->RecvLoadRemoteScript(
+      NS_LITERAL_STRING("chrome://global/content/preload2.js"),
+      true);
+}
+
 /*static*/ already_AddRefed<TabChild>
 TabChild::Create(nsIContentChild* aManager,
                  const TabContext &aContext,
