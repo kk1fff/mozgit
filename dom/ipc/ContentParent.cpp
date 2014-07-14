@@ -651,6 +651,9 @@ ContentParent::GetNewOrPreallocatedAppProcess(mozIApplication* aApp,
 
     // XXXkhuey Nuwa wants the frame loader to try again later, but the
     // frame loader is really not set up to do that ...
+#ifdef MOZ_NUWA_PROCESS
+            return nullptr;
+#endif
     NS_WARNING("Unable to use pre-allocated app process");
     process = new ContentParent(aApp,
                                 /* aOpener = */ aOpener,
