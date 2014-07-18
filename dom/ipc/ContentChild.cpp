@@ -1979,6 +1979,8 @@ ContentChild::RecvAppInfo(const nsCString& version, const nsCString& buildID,
     }
 
     if (IsNuwaProcess()) {
+        printf_stderr("TEST: NuwaWaiting");
+        clock_gettime(CLOCK_MONOTONIC, &ts_nuwa_waiting);
         SendNuwaWaiting();
     }
 
@@ -2003,6 +2005,8 @@ ContentChild::RecvNuwaCanFreeze()
 {
 #ifdef MOZ_NUWA_PROCESS
     if (IsNuwaProcess()) {
+        printf_stderr("TEST: NuwaCanFreeze");
+        clock_gettime(CLOCK_MONOTONIC, &ts_nuwa_can_freeze);
         ContentChild::GetSingleton()->RecvGarbageCollect();
         MessageLoop::current()->PostTask(
             FROM_HERE, NewRunnableFunction(OnFinishNuwaPreparation));
@@ -2397,7 +2401,30 @@ OnNuwaProcessReady()
 {
     mozilla::dom::ContentChild* content =
         mozilla::dom::ContentChild::GetSingleton();
+    struct timespec ts;
+    printf_stderr("TEST: SendNuwaReady");
+    clock_gettime(CLOCK_MONOTONIC, &ts);
     content->SendNuwaReady();
+
+    // log time spent.
+    // waiting -> freeze
+    time_t sec = ts_nuwa_can_freeze.tv_sec - ts_nuwa_waiting.tv_sec;
+    long ns = ts_nuwa_can_freeze.tv_nsec - ts_nuwa_waiting.tv_nsec;
+    if (ns < 0) {
+        ns = 1000000000L - ns;
+        sec--;
+    }
+    printf_stderr("TEST: Nuwa Waiting->Can Freeze: %d %09ld", sec, ns);
+    printf("TEST: Nuwa Waiting->Can Freeze: %d %09ld\n", sec, ns);
+
+    sec = ts.tv_sec - ts_nuwa_can_freeze.tv_sec;
+    ns = ts.tv_nsec - ts_nuwa_can_freeze.tv_nsec;
+    if (ns < 0) {
+        ns = 1000000000L - ns;
+        sec--;
+    }
+    printf_stderr("TEST: Nuwa Can freeze->Ready: %d %09ld", sec, ns);
+    printf("TEST: Nuwa Can freeze->Ready: %d %09ld\n", sec, ns);
 }
 
 NS_EXPORT void
