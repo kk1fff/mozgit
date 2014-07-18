@@ -132,6 +132,8 @@
 #include "prio.h"
 #include "private/pprio.h"
 
+void GetSystemStartTime(timespec *ts);
+
 #if defined(ANDROID) || defined(LINUX)
 #include "nsSystemInfo.h"
 #endif
@@ -2506,6 +2508,23 @@ ContentParent::RecvAddNewProcess(const uint32_t& aPid,
         KillHard();
         return false;
     }
+
+    static bool isFirstProcess = true;
+
+    if (isFirstProcess) {
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        isFirstProcess = false;
+        struct timespec ts_sys;
+        GetSystemStartTime(&ts_sys);
+        printf_stderr("TEST: First Preallocated process ready: %d %ld",
+                      ts.tv_sec - ts_sys.tv_sec,
+                      ts.tv_sec - ts_sys.tv_nsec);
+        printf("TEST: First Preallocated process ready: %d %ld\n",
+               ts.tv_sec - ts_sys.tv_sec,
+               ts.tv_sec - ts_sys.tv_nsec);
+    }
+
     nsRefPtr<ContentParent> content;
     content = new ContentParent(this,
                                 MAGIC_PREALLOCATED_APP_MANIFEST_URL,

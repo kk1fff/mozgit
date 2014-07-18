@@ -239,6 +239,12 @@ static char **gQtOnlyArgv;
 #endif
 #include "BinaryPath.h"
 
+static struct timespec ts_system_start;
+
+MOZ_EXPORT void GetSystemStartTime(timespec *ts) {
+  *ts = ts_system_start;
+}
+
 #ifdef MOZ_LINKER
 extern "C" MFBT_API bool IsSignalHandlingBroken();
 #endif
@@ -4110,6 +4116,7 @@ XREMain::XRE_mainRun()
 int
 XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
 {
+  clock_gettime(CLOCK_MONOTONIC, &ts_system_start);
   char aLocal;
   GeckoProfilerInitRAII profilerGuard(&aLocal);
 
