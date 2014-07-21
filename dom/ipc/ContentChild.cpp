@@ -164,6 +164,10 @@
 #include "mozilla/net/NeckoMessageUtils.h"
 #include "mozilla/RemoteSpellCheckEngineChild.h"
 
+static struct timespec ts_nuwa_waiting, ts_nuwa_can_freeze;
+
+extern "C" MFBT_API void GetForkTime(timespec *ts);
+
 using namespace base;
 using namespace mozilla;
 using namespace mozilla::docshell;
@@ -1960,6 +1964,19 @@ ContentChild::RecvAppInfo(const nsCString& version, const nsCString& buildID,
 #endif
        ) {
         PreloadSlowThings();
+    }
+
+    if (!IsNuwaProcess()) {
+        timespec ts_fork;
+        timespec ts_now;
+        clock_gettime(CLOCK_MONOTONIC, &ts_now);
+        GetForkTime(&ts_fork);
+        printf_stderr("TEST: preallocated process ready: %d %ld",
+                      ts_now.tv_sec - ts_fork.tv_sec,
+                      ts_now.tv_nsec - ts_fork.tv_nsec);
+        printf("TEST: preallocated process ready: %d %ld",
+               ts_now.tv_sec - ts_fork.tv_sec,
+               ts_now.tv_nsec - ts_fork.tv_nsec);
     }
 
 #ifdef MOZ_NUWA_PROCESS

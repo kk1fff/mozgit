@@ -29,6 +29,8 @@
 
 using namespace mozilla;
 
+static timespec sForkTimespec;
+
 extern "C" MFBT_API int tgkill(pid_t tgid, pid_t tid, int signalno) {
   return syscall(__NR_tgkill, tgid, tid, signalno);
 }
@@ -1665,6 +1667,7 @@ ForkIPCProcess() {
       printf("\n\nNUWA CHILDCHILDCHILDCHILD\n  debug me @ %d\n\n", getpid());
       sleep(30);
     }
+    clock_gettime(CLOCK_MONOTONIC, &sForkTimespec);
     AfterForkHook();
     ReplaceSignalFds();
     ReplaceIPC(sProtoFdInfos, sProtoFdInfosSize);
@@ -1930,6 +1933,11 @@ IsNuwaProcess() {
 MFBT_API bool
 IsNuwaReady() {
   return sNuwaReady;
+}
+
+MFBT_API void
+GetForkTime(timespec *ts) {
+  *ts = sForkTimespec;
 }
 
 }      // extern "C"
