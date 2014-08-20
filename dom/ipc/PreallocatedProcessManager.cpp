@@ -59,6 +59,7 @@ public:
   bool PreallocatedProcessReady();
   already_AddRefed<ContentParent> GetSpareProcess();
   void RunAfterPreallocatedProcessReady(nsIRunnable* aRunnable);
+  void MaybeRunNextForkRequest();
 
 private:
   void NuwaFork();
@@ -224,11 +225,45 @@ PreallocatedProcessManagerImpl::AllocateNow()
 
 #ifdef MOZ_NUWA_PROCESS
 
+
+class RunAfterPreallocatedProcessReadyRunnable: public nsRunnable
+{
+public:
+  RunAfterPreallocatedProcessReadyRunnable(nsIRunnable* wrappedRunnable)
+    : mWrappedRunnable(wrappedRunnable) { }
+
+  NS_IMETHODIMP
+  Run() {
+    mWrappedRunnable->Run();
+    mWrappedRunnable = nullptr;
+    PreallocatedProcessManagerImpl::Singleton()->MaybeRunNextForkRequest();
+    return NS_OK;
+  }
+private:
+  nsCOMPtr<nsIRunnable> mWrappedRunnable;
+};
+
+void
+PreallocatedProcessManagerImpl::MaybeRunNextForkRequest()
+{
+  if (!PreallocatedProcessManagerImpl::PreallocatedProcessReady()) {
+    return;
+  }
+  if (mDelayedContentParentRequests.IsEmpty()) {
+    return;
+  }
+  nsCOMPtr<nsIRunnable> runnable = mDelayedContentParentRequests[0];
+  mDelayedContentParentRequests.RemoveElementAt(0);
+  NS_DispatchToMainThread(runnable);
+}
+
 void
 PreallocatedProcessManagerImpl::RunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  mDelayedContentParentRequests.AppendElement(aRequest);
+  nsRefPtr<RunAfterPreallocatedProcessReadyRunnable> runnable =
+    new RunAfterPreallocatedProcessReadyRunnable(aRequest);
+  mDelayedContentParentRequests.AppendElement(runnable);
 
   // This is an urgent NuwaFork() request. Request to fork at once.
   DelayedNuwaFork();
