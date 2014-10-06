@@ -52,6 +52,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <string>
 #include <vector>
+#include <iostream>
+#include <sstream>
 
 #include "sigslot.h"
 
@@ -159,6 +161,26 @@ class NrIceTurnServer : public NrIceStunServer {
   }
 
   nsresult ToNicerTurnStruct(nr_ice_turn_server *server) const;
+
+  void PrintTurn() const {
+    std::ostringstream oss;
+    for (auto c: password_) {
+      if (isprint(c)) {
+        oss << (char)c;
+      } else {
+        oss << "(" << (int)c << ")";
+      }
+    }
+    std::cout << "Dumping Trun information:"
+              << "  host: " << host_ << ":" << port_ << std::endl
+              << "  username: " << username_ << std::endl
+              << "  password: " << oss.str() << std::endl
+              << "  transport: " << transport_ << std::endl;
+  }
+
+  bool IsTcp() const {
+    return transport_ == kNrIceTransportTcp;
+  }
 
  private:
   NrIceTurnServer(const std::string& username,

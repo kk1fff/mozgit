@@ -504,6 +504,7 @@ abort:
 // This should be called on the STS thread.
 int NrSocket::sendto(const void *msg, size_t len,
                      int flags, nr_transport_addr *to) {
+  return 0;
   ASSERT_ON_THREAD(ststhread_);
   int r,_status;
   PRNetAddr naddr;
@@ -904,6 +905,8 @@ int NrSocketIpc::sendto(const void *msg, size_t len, int flags,
   }
 
   nsAutoPtr<DataBuffer> buf(new DataBuffer(static_cast<const uint8_t*>(msg), len));
+
+  return 0;
 
   RUN_ON_THREAD(main_thread_,
                 mozilla::WrapRunnable(nsRefPtr<NrSocketIpc>(this),

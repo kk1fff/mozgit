@@ -556,6 +556,7 @@ NrIceCtx::Controlling NrIceCtx::GetControlling() {
 
 nsresult NrIceCtx::SetStunServers(const std::vector<NrIceStunServer>&
                                   stun_servers) {
+  return NS_OK;
   if (stun_servers.empty())
     return NS_OK;
 
@@ -582,20 +583,30 @@ nsresult NrIceCtx::SetStunServers(const std::vector<NrIceStunServer>&
 // Could we do a template or something?
 nsresult NrIceCtx::SetTurnServers(const std::vector<NrIceTurnServer>&
                                   turn_servers) {
+  size_t cnt = 0;
+  for (auto t: turn_servers) {
+    if (t.IsTcp()) {
+      cnt++;
+    }
+  }
   if (turn_servers.empty())
     return NS_OK;
 
-  auto servers = MakeUnique<nr_ice_turn_server[]>(turn_servers.size());
+  auto servers = MakeUnique<nr_ice_turn_server[]>(cnt);
 
+  size_t next_idx = 0;
   for (size_t i=0; i < turn_servers.size(); ++i) {
-    nsresult rv = turn_servers[i].ToNicerTurnStruct(&servers[i]);
-    if (NS_FAILED(rv)) {
-      MOZ_MTLOG(ML_ERROR, "Couldn't set TURN server for '" << name_ << "'");
-      return NS_ERROR_FAILURE;
+    if (turn_servers[i].IsTcp()) {
+      turn_servers[i].PrintTurn();
+      nsresult rv = turn_servers[i].ToNicerTurnStruct(&servers[next_idx++]);
+      if (NS_FAILED(rv)) {
+        MOZ_MTLOG(ML_ERROR, "Couldn't set TURN server for '" << name_ << "'");
+        return NS_ERROR_FAILURE;
+      }
     }
   }
 
-  int r = nr_ice_ctx_set_turn_servers(ctx_, servers.get(), turn_servers.size());
+  int r = nr_ice_ctx_set_turn_servers(ctx_, servers.get(), cnt);
   if (r) {
     MOZ_MTLOG(ML_ERROR, "Couldn't set TURN server for '" << name_ << "'");
     return NS_ERROR_FAILURE;
