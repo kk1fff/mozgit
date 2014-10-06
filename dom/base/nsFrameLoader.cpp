@@ -359,6 +359,13 @@ nsFrameLoader::ReallyStartLoadingInternal()
           mPendingFrameSent = true;
         }
       }
+      if (Preferences::GetBool("dom.ipc.processPrelaunch.enabled", false) &&
+          !ContentParent::PreallocatedProcessReady()) {
+
+        ContentParent::RunAfterPreallocatedProcessReady(
+            new DelayedStartLoadingRunnable(this));
+        return NS_ERROR_FAILURE;
+      }
 
       TryRemoteBrowser();
 
