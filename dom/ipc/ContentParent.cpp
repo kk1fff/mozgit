@@ -850,6 +850,14 @@ static GrandchildMap sGrandchildProcessMap;
 
 std::map<uint64_t, ContentParent*> sContentParentMap;
 
+void
+ContentParent::RunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
+{
+#ifdef MOZ_NUWA_PROCESS
+    PreallocatedProcessManager::RunAfterPreallocatedProcessReady(aRequest);
+#endif
+}
+
 bool
 ContentParent::RecvCreateChildProcess(const IPCTabContext& aContext,
                                       const hal::ProcessPriority& aPriority,
@@ -1068,7 +1076,9 @@ ContentParent::CreateBrowserOrApp(const TabContext& aContext,
                                                initialPriority,
                                                nullptr,
                                                &tookPreallocated);
-            MOZ_ASSERT(p);
+            if (!p) {
+                return nullptr;
+            }
             sAppContentParents->Put(manifestURL, p);
         }
         parent = static_cast<nsIContentParent*>(p);
