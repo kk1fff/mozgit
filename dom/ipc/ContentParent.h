@@ -108,6 +108,11 @@ public:
 
     static bool PreallocatedProcessReady();
 
+#ifdef MOZ_NUWA_PROCESS
+    static void AddRunAfterPreallocatedProcessReady(nsIRunnable* aRequest);
+    static void RemoveRunAfterPreallocatedProcessReady(nsIRunnable* aRequest);
+#endif
+
     /**
      * Get or create a content process for:
      * 1. browser iframe

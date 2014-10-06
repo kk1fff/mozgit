@@ -378,6 +378,8 @@ private:
   // See nsIFrameLoader.idl. EVENT_MODE_NORMAL_DISPATCH automatically
   // forwards some input events to out-of-process content.
   uint32_t mEventMode;
+
+  nsCOMPtr<nsIRunnable> mDelayedStartLoadingRunnable;
 };
 
 #endif

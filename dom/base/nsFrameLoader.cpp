@@ -340,9 +340,31 @@ nsFrameLoader::ReallyStartLoadingInternal()
   }
 
   if (mRemoteFrame) {
-    if (!mRemoteBrowser && !TryRemoteBrowser()) {
+    if (!mRemoteBrowser) {
+#ifdef MOZ_NUWA_PROCESS
+      if (Preferences::GetBool("dom.ipc.processPrelaunch.enabled", false) &&
+          !ContentParent::PreallocatedProcessReady()) {
+        // We failed to get the content parent from preallocated process. ContentProcess
+        // will create one for us.
+        if (mDelayedStartLoadingRunnable) {
+          ContentParent::RemoveRunAfterPreallocatedProcessReady(mDelayedStartLoadingRunnable);
+          mDelayedStartLoadingRunnable = nullptr;
+        }
+
+        mDelayedStartLoadingRunnable = new DelayedStartLoadingRunnable(this);
+        ContentParent::AddRunAfterPreallocatedProcessReady(
+          mDelayedStartLoadingRunnable);
+
+        // Init browser API before content process created. Call to
+        // browser methods are queued in browser element parent.
+        InitializeBrowserAPI();
+        return NS_OK;
+      }
+#endif // MOZ_NUWA_PROCESS
+      if (TryRemoteBrowser()) {
         NS_WARNING("Couldn't create child process for iframe.");
         return NS_ERROR_FAILURE;
+      }
     }
 
     // Execute pending frame scripts before loading URL

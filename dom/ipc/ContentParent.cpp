@@ -686,8 +686,11 @@ ContentParent::GetNewOrPreallocatedAppProcess(mozIApplication* aApp,
         }
     }
 
-    // XXXkhuey Nuwa wants the frame loader to try again later, but the
-    // frame loader is really not set up to do that ...
+#ifdef MOZ_NUWA_PROCESS
+    if (Preferences::GetBool("dom.ipc.processPrelaunch.enabled", false)) {
+        return nullptr;
+    }
+#endif
     NS_WARNING("Unable to use pre-allocated app process");
     process = new ContentParent(aApp,
                                 /* aOpener = */ aOpener,
@@ -883,6 +886,20 @@ ContentParent::PreallocatedProcessReady()
     return true;
 #endif
 }
+
+#ifdef MOZ_NUWA_PROCESS
+void
+ContentParent::AddRunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
+{
+    PreallocatedProcessManager::AddRunAfterPreallocatedProcessReady(aRequest);
+}
+
+void
+ContentParent::RemoveRunAfterPreallocatedProcessReady(nsIRunnable* aRequest)
+{
+    PreallocatedProcessManager::RemoveRunAfterPreallocatedProcessReady(aRequest);
+}
+#endif
 
 bool
 ContentParent::RecvCreateChildProcess(const IPCTabContext& aContext,
@@ -1181,7 +1198,9 @@ ContentParent::CreateBrowserOrApp(const TabContext& aContext,
                                                initialPriority,
                                                nullptr,
                                                &tookPreallocated);
-            MOZ_ASSERT(p);
+            if (!p) {
+                return nullptr;
+            }
             sAppContentParents->Put(manifestURL, p);
         }
         tabId = AllocateTabId(openerTabId,
