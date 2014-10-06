@@ -371,6 +371,25 @@ nsFrameLoader::ReallyStartLoadingInternal()
         }
       }
 
+#ifdef MOZ_NUWA_PROCESS
+      if (Preferences::GetBool("dom.ipc.processPrelaunch.enabled", false) &&
+          !ContentParent::PreallocatedProcessReady()) {
+        // We failed to get the content parent from preallocated process. ContentProcess
+        // will create one for us.
+        if (mDelayedStartLoadingRunnable) {
+          ContentParent::RemoveRunAfterPreallocatedProcessReady(mDelayedStartLoadingRunnable);
+          mDelayedStartLoadingRunnable = nullptr;
+        }
+
+        mDelayedStartLoadingRunnable = new DelayedStartLoadingRunnable(this);
+        ContentParent::AddRunAfterPreallocatedProcessReady(
+          mDelayedStartLoadingRunnable);
+
+        // Init browser API before content process created. Call to
+        // browser methods are queued in browser element parent.
+        return NS_OK;
+      }
+#endif // MOZ_NUWA_PROCESS
       TryRemoteBrowser();
 
       if (!mRemoteBrowser) {

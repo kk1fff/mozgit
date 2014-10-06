@@ -372,6 +372,7 @@ private:
 
   // Indicate if we have sent 'remote-browser-pending'.
   bool mPendingFrameSent;
+  nsCOMPtr<nsIRunnable> mDelayedStartLoadingRunnable;
 };
 
 #endif
