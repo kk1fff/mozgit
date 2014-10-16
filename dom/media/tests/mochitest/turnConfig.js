@@ -9,4 +9,11 @@
  * };
   */
 
-var turnServers = { };
+var turnServers = {
+  local: { iceServers: [{"username":"patrick2",
+                         "credential":"1234",
+                         "url":"turn:192.168.56.100?transport=tcp"}] },
+  remote: { iceServers: [{"username":"patrick1",
+                          "credential":"1234",
+                          "url":"turn:192.168.56.100?transport=tcp"}] }
+};

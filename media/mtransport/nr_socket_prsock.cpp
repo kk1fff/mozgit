@@ -903,6 +903,7 @@ int NrUdpSocketIpc::sendto(const void *msg, size_t len, int flags,
     return r;
   }
 
+#if 0
   nsAutoPtr<DataBuffer> buf(new DataBuffer(static_cast<const uint8_t*>(msg), len));
 
   RUN_ON_THREAD(main_thread_,
@@ -910,6 +911,7 @@ int NrUdpSocketIpc::sendto(const void *msg, size_t len, int flags,
                                       &NrUdpSocketIpc::sendto_m,
                                       addr, buf),
                 NS_DISPATCH_NORMAL);
+#endif
   return 0;
 }
 
@@ -1310,6 +1312,7 @@ int NrTcpSocketIpc::connect(nr_transport_addr *addr) {
     ABORT(r);
   }
 
+  printf("[NrTcpSocketIpc] (%p) connect to: %s:%d\n", this, remote_addr.get(), remote_port);
   state_ = NR_CONNECTING;
   RUN_ON_THREAD(main_thread_,
                 mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
@@ -1335,6 +1338,7 @@ int NrTcpSocketIpc::write(const void *msg, size_t len, size_t *written) {
     ABORT(R_WOULDBLOCK);
   }
 
+  printf("[NrTcpSocketIpc] (%p) write\n", this);
   buffered_byte_ += len;
   {
     InfallibleTArray<uint8_t>* arr = new InfallibleTArray<uint8_t>();
@@ -1360,6 +1364,7 @@ int NrTcpSocketIpc::read(void* buf, size_t maxlen, size_t *len) {
     ABORT(R_WOULDBLOCK);
   }
 
+  printf("[NrTcpSocketIpc] (%p) read\n", this);
   {
     nsRefPtr<nr_tcp_message> msg(msg_queue_.front());
     size_t consumed_len = std::min(maxlen, msg->unread_byte());
