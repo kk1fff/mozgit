@@ -64,6 +64,8 @@ public:
 
   static nsresult
   SetMainThreadObserver(nsIThreadObserver* aObserver);
+  uint32_t QueueLength();
+
 
 protected:
   static nsIThreadObserver* sMainThreadObserver;
@@ -124,6 +126,11 @@ protected:
     bool HasPendingEvent()
     {
       return mQueue.HasPendingEvent();
+    }
+
+    uint32_t Length()
+    {
+      return mQueue.Length();
     }
 
     nsChainedEventQueue* mNext;

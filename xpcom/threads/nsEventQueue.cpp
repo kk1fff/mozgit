@@ -35,6 +35,7 @@ nsEventQueue::nsEventQueue()
   , mTail(nullptr)
   , mOffsetHead(0)
   , mOffsetTail(0)
+  , mNum(0)
 {
 }
 
@@ -70,7 +71,7 @@ nsEventQueue::GetEvent(bool aMayWait, nsIRunnable** aResult)
 
     if (aResult) {
       *aResult = mHead->mEvents[mOffsetHead++];
-
+      mNum--;
       // Check if mHead points to empty Page
       if (mOffsetHead == EVENTS_PER_PAGE) {
         Page* dead = mHead;
@@ -119,5 +120,6 @@ nsEventQueue::PutEvent(nsIRunnable* aRunnable)
   event.swap(mTail->mEvents[mOffsetTail]);
   ++mOffsetTail;
   LOG(("EVENTQ(%p): notify\n", this));
+  mNum++;
   mon.NotifyAll();
 }

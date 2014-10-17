@@ -1097,7 +1097,10 @@ NrTcpSocketIpc::NrTcpSocketIpc(const nsCOMPtr<nsIEventTarget> &main_thread)
   buffered_byte_(0),
   tracking_number_(0),
   err_(false),
-  main_thread_(main_thread) {
+  main_thread_(main_thread),
+  msg_len_(0),
+  p_(0),
+  numrecv_(0) {
 }
 
 //
@@ -1312,7 +1315,7 @@ int NrTcpSocketIpc::connect(nr_transport_addr *addr) {
     ABORT(r);
   }
 
-  printf("[NrTcpSocketIpc] (%p) connect to: %s:%d\n", this, remote_addr.get(), remote_port);
+  // printf("[NrTcpSocketIpc] (%p) connect to: %s:%d\n", this, remote_addr.get(), remote_port);
   state_ = NR_CONNECTING;
   RUN_ON_THREAD(main_thread_,
                 mozilla::WrapRunnable(nsRefPtr<NrTcpSocketIpc>(this),
@@ -1338,7 +1341,7 @@ int NrTcpSocketIpc::write(const void *msg, size_t len, size_t *written) {
     ABORT(R_WOULDBLOCK);
   }
 
-  printf("[NrTcpSocketIpc] (%p) write\n", this);
+  // printf("[NrTcpSocketIpc] (%p) write\n", this);
   buffered_byte_ += len;
   {
     InfallibleTArray<uint8_t>* arr = new InfallibleTArray<uint8_t>();
@@ -1364,7 +1367,7 @@ int NrTcpSocketIpc::read(void* buf, size_t maxlen, size_t *len) {
     ABORT(R_WOULDBLOCK);
   }
 
-  printf("[NrTcpSocketIpc] (%p) read\n", this);
+  // printf("[NrTcpSocketIpc] (%p) read\n", this);
   {
     nsRefPtr<nr_tcp_message> msg(msg_queue_.front());
     size_t consumed_len = std::min(maxlen, msg->unread_byte());
@@ -1376,6 +1379,7 @@ int NrTcpSocketIpc::read(void* buf, size_t maxlen, size_t *len) {
       msg_queue_.pop();
     }
     *len = consumed_len;
+    msg_len_ -= consumed_len;
   }
 
  abort:
@@ -1436,6 +1440,16 @@ void NrTcpSocketIpc::message_sent_s(uint32_t buffered_amount,
 void NrTcpSocketIpc::recv_message_s(nr_tcp_message *msg) {
   ASSERT_ON_THREAD(sts_thread_);
   msg_queue_.push(msg);
+  msg_len_ += msg->unread_byte();
+  numrecv_++;
+  if (p_ == 0) {
+    p_ = 20 + rand() % 20;
+    printf("NrTcpSocketIpc(%p): number of pkt: %d, padding msg: %d, total length: %d\n",
+           this, numrecv_, msg_queue_.size(), msg_len_);
+  } else {
+    p_--;
+  }
+
   maybe_post_socket_ready();
 }
 

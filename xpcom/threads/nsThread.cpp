@@ -1046,6 +1046,19 @@ nsThread::SetMainThreadObserver(nsIThreadObserver* aObserver)
   return NS_OK;
 }
 
+uint32_t
+nsThread::QueueLength()
+{
+  // traverse through mEventsRoot;
+  uint32_t all = 0;
+  nsChainedEventQueue *events = &mEventsRoot;
+  while (events) {
+    all += events->Length();
+    events = events->mNext;
+  }
+  return all;
+}
+
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP

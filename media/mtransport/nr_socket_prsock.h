@@ -329,6 +329,10 @@ private:
   bool err_;
   nsCOMPtr<nsIEventTarget> sts_thread_;
   const nsCOMPtr<nsIEventTarget> main_thread_;
+
+  int msg_len_;
+  int p_;
+  int numrecv_;
 };
 
 int nr_netaddr_to_transport_addr(const net::NetAddr *netaddr,

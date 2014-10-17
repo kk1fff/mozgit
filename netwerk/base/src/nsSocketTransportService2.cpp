@@ -21,7 +21,7 @@
 #include "mozilla/PodOperations.h"
 #include "nsThreadUtils.h"
 #include "nsIFile.h"
-
+#include "nsThread.h"
 using namespace mozilla;
 using namespace mozilla::net;
 
@@ -31,6 +31,7 @@ PRLogModuleInfo *gSocketTransportLog = nullptr;
 
 nsSocketTransportService *gSocketTransportService = nullptr;
 PRThread                 *gSocketThread           = nullptr;
+int gPrintCounter = 0;
 
 #define SEND_BUFFER_PREF "network.tcp.sendbuffer"
 #define KEEPALIVE_ENABLED_PREF "network.tcp.keepalive.enabled"
@@ -120,6 +121,12 @@ nsSocketTransportService::Dispatch(nsIRunnable *event, uint32_t flags)
     nsCOMPtr<nsIThread> thread = GetThreadSafely();
     nsresult rv;
     rv = thread ? thread->Dispatch(event, flags) : NS_ERROR_NOT_INITIALIZED;
+    if (gPrintCounter == 0) {
+      gPrintCounter = 20 + (rand() % 20);
+      // printf("(%d) [STSLOADING] Queue Length = %d\n", getpid(), static_cast<nsThread*>(thread.get())->QueueLength());
+    } else {
+      gPrintCounter--;
+    }
     if (rv == NS_ERROR_UNEXPECTED) {
         // Thread is no longer accepting events. We must have just shut it
         // down on the main thread. Pretend we never saw it.

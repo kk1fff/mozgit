@@ -51,6 +51,10 @@ public:
     return mReentrantMonitor;
   }
 
+  uint32_t Length() {
+    return mNum;
+  }
+
 private:
 
   bool IsEmpty()
@@ -91,6 +95,7 @@ private:
 
   uint16_t mOffsetHead;  // offset into mHead where next item is removed
   uint16_t mOffsetTail;  // offset into mTail where next item is added
+  uint32_t mNum;
 };
 
 #endif  // nsEventQueue_h__
