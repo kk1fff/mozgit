@@ -1330,6 +1330,7 @@ public:
 
     void OnAllThreadHadIdled()
     {
+        printf_stderr("TEST: Nuwa can freeze.");
         unused << mParent->SendNuwaCanFreeze();
         nsThreadManager::get()->RemoveAllThreadHadIdledListener(this);
     }

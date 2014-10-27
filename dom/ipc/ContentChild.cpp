@@ -1946,6 +1946,7 @@ PreloadSlowThings()
     nsLayoutStylesheetCache::UserContentSheet();
 
     TabChild::PreloadSlowThings();
+    printf_stderr("TEST: Done preload slow things.\n");
 
 }
 
