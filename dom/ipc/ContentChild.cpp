@@ -537,6 +537,9 @@ ContentChild::ContentChild()
 #endif
    , mCanOverrideProcessName(true)
    , mIsAlive(true)
+#ifdef MOZ_NUWA_PROCESS
+   , mDontFlushMemory(false)
+#endif
 {
     // This process is a content process, so it's clearly running in
     // multiprocess mode!
@@ -644,6 +647,9 @@ ContentChild::Init(MessageLoop* aIOLoop,
 
 #ifdef MOZ_NUWA_PROCESS
     SetTransport(aChannel);
+    if (IsNuwaProcess()) {
+        mDontFlushMemory = true;
+    }
 #endif
 
     NS_ASSERTION(!sSingleton, "only one ContentChild per child");
@@ -1234,6 +1240,9 @@ ContentChild::RecvPBrowserConstructor(PBrowserChild* aActor,
 {
     // This runs after AllocPBrowserChild() returns and the IPC machinery for this
     // PBrowserChild has been set up.
+#ifdef MOZ_NUWA_PROCESS
+    mDontFlushMemory = false;
+#endif
 
     nsCOMPtr<nsIObserverService> os = services::GetObserverService();
     if (os) {
@@ -1986,6 +1995,9 @@ ContentChild::RecvFlushMemory(const nsString& reason)
         // Don't flush memory in the nuwa process: the GC thread could be frozen.
         return true;
     }
+    if (mDontFlushMemory) {
+        return true;
+    }
 #endif
     nsCOMPtr<nsIObserverService> os =
         mozilla::services::GetObserverService();
@@ -2071,7 +2083,7 @@ ContentChild::RecvAppInfo(const nsCString& version, const nsCString& buildID,
     // BrowserElementChild.js.
     if ((mIsForApp || mIsForBrowser)
 #ifdef MOZ_NUWA_PROCESS
-        && !IsNuwaProcess()
+        && IsNuwaProcess()
 #endif
        ) {
         PreloadSlowThings();
@@ -2079,12 +2091,22 @@ ContentChild::RecvAppInfo(const nsCString& version, const nsCString& buildID,
 
 #ifdef MOZ_NUWA_PROCESS
     if (IsNuwaProcess()) {
+        SendNuwaReadyForFreeze();
+    }
+#endif
+    return true;
+}
+
+bool
+ContentChild::RecvNuwaCanFreeze()
+{
+#ifdef MOZ_NUWA_PROCESS
+    if (IsNuwaProcess()) {
         ContentChild::GetSingleton()->RecvGarbageCollect();
         MessageLoop::current()->PostTask(
             FROM_HERE, NewRunnableFunction(OnFinishNuwaPreparation));
     }
 #endif
-
     return true;
 }
 
@@ -2320,6 +2342,36 @@ RunNuwaFork()
       DoNuwaFork();
     }
 }
+
+class NuwaForkCaller: public nsRunnable
+{
+public:
+    NS_IMETHODIMP
+    Run() {
+        // We want to ensure that the PBackground actor gets cloned in the Nuwa
+        // process before we freeze. Also, we have to do this to avoid deadlock.
+        // Protocols that are "opened" (e.g. PBackground, PCompositor) block the
+        // main thread to wait for the IPC thread during the open operation.
+        // NuwaSpawnWait() blocks the IPC thread to wait for the main thread when
+        // the Nuwa process is forked. Unless we ensure that the two cannot happen
+        // at the same time then we risk deadlock. Spinning the event loop here
+        // guarantees the ordering is safe for PBackground.
+        if (!BackgroundChild::GetForCurrentThread()) {
+            // Dispatch ourself again.
+            NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL);
+        } else {
+            MessageLoop* ioloop = XRE_GetIOMessageLoop();
+            ioloop->PostTask(FROM_HERE, NewRunnableFunction(RunNuwaFork));
+        }
+        return NS_OK;
+    }
+private:
+    virtual
+    ~NuwaForkCaller()
+    {
+    }
+};
+
 #endif
 
 bool
@@ -2331,22 +2383,9 @@ ContentChild::RecvNuwaFork()
     }
     sNuwaForking = true;
 
-    // We want to ensure that the PBackground actor gets cloned in the Nuwa
-    // process before we freeze. Also, we have to do this to avoid deadlock.
-    // Protocols that are "opened" (e.g. PBackground, PCompositor) block the
-    // main thread to wait for the IPC thread during the open operation.
-    // NuwaSpawnWait() blocks the IPC thread to wait for the main thread when
-    // the Nuwa process is forked. Unless we ensure that the two cannot happen
-    // at the same time then we risk deadlock. Spinning the event loop here
-    // guarantees the ordering is safe for PBackground.
-    while (!BackgroundChild::GetForCurrentThread()) {
-        if (NS_WARN_IF(!NS_ProcessNextEvent())) {
-            return false;
-        }
-    }
+    nsRefPtr<NuwaForkCaller> runnable = new NuwaForkCaller();
+    NS_DispatchToMainThread(runnable, NS_DISPATCH_NORMAL);
 
-    MessageLoop* ioloop = XRE_GetIOMessageLoop();
-    ioloop->PostTask(FROM_HERE, NewRunnableFunction(RunNuwaFork));
     return true;
 #else
     return false; // Makes the underlying IPC channel abort.

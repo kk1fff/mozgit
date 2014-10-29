@@ -119,6 +119,7 @@
 #include "nsServiceManagerUtils.h"
 #include "nsStyleSheetService.h"
 #include "nsThreadUtils.h"
+#include "nsThreadManager.h"
 #include "nsToolkitCompsCID.h"
 #include "nsWidgetsCID.h"
 #include "PreallocatedProcessManager.h"
@@ -1376,6 +1377,28 @@ StaticAutoPtr<LinkedList<SystemMessageHandledListener> >
 NS_IMPL_ISUPPORTS(SystemMessageHandledListener,
                   nsITimerCallback)
 
+#ifdef MOZ_NUWA_PROCESS
+class NuwaCanFreezeListener : public nsThreadManager::AllThreadHadIdledListener
+{
+public:
+    NuwaCanFreezeListener(ContentParent* parent)
+        : mParent(parent)
+    {
+    }
+
+    void OnAllThreadHadIdled()
+    {
+        unused << mParent->SendNuwaCanFreeze();
+        nsThreadManager::get()->RemoveAllThreadHadIdledListener(this);
+    }
+private:
+    nsRefPtr<ContentParent> mParent;
+    virtual ~NuwaCanFreezeListener()
+    {
+    }
+};
+#endif // MOZ_NUWA_PROCESS
+
 } // anonymous namespace
 
 void
@@ -2048,6 +2071,8 @@ ContentParent::ContentParent(ContentParent* aTemplate,
         priority = PROCESS_PRIORITY_FOREGROUND;
     }
 
+    mSendPermissionUpdates = aTemplate->mSendPermissionUpdates;
+
     InitInternal(priority,
                  false, /* Setup Off-main thread compositing */
                  false  /* Send registered chrome */);
@@ -2205,7 +2230,7 @@ ContentParent::IsForApp()
 
 #ifdef MOZ_NUWA_PROCESS
 bool
-ContentParent::IsNuwaProcess()
+ContentParent::IsNuwaProcess() const
 {
     return mIsNuwaProcess;
 }
@@ -2552,6 +2577,19 @@ ContentParent::RecvNuwaReady()
     NS_ERROR("ContentParent::RecvNuwaReady() not implemented!");
     return false;
 #endif
+}
+
+bool
+ContentParent::RecvNuwaReadyForFreeze()
+{
+#ifdef MOZ_NUWA_PROCESS
+    nsRefPtr<NuwaCanFreezeListener> listener = new NuwaCanFreezeListener(this);
+    nsThreadManager::get()->AddAllThreadHadIdledListener(listener);
+    return true;
+#else // MOZ_NUWA_PROCESS
+    NS_ERROR("ContentParent::RecvNuwaReadyForFreeze() not implemented!");
+    return false;
+#endif // MOZ_NUWA_PROCESS
 }
 
 bool

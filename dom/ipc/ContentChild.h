@@ -352,6 +352,8 @@ public:
 
     virtual bool RecvNotifyPhoneStateChange(const nsString& state) MOZ_OVERRIDE;
 
+    virtual bool RecvNuwaCanFreeze() MOZ_OVERRIDE;
+
     void AddIdleObserver(nsIObserver* aObserver, uint32_t aIdleTimeInS);
     void RemoveIdleObserver(nsIObserver* aObserver, uint32_t aIdleTimeInS);
     virtual bool RecvNotifyIdleObserver(const uint64_t& aObserver,
@@ -445,6 +447,9 @@ private:
     static ContentChild* sSingleton;
 
     DISALLOW_EVIL_CONSTRUCTORS(ContentChild);
+#ifdef MOZ_NUWA_PROCESS
+    bool mDontFlushMemory;
+#endif
 };
 
 } // namespace dom
