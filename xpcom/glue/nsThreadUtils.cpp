@@ -375,3 +375,21 @@ nsAutoLowPriorityIO::~nsAutoLowPriorityIO()
 #endif
 }
 
+#ifdef MOZ_NUWA_PROCESS
+#ifdef MOZILLA_INTERNAL_API
+void
+NS_SetCurrentThreadWorking() {
+  nsThreadManager::get()->SetThreadWorking();
+}
+
+void
+NS_SetCurrentThreadIdle() {
+  nsThreadManager::get()->SetThreadIdle();
+}
+
+void
+NS_SetIgnoreStatusOfCurrentThread() {
+  nsThreadManager::get()->SetIgnoreThreadStatus();
+}
+#endif // MOZILLA_INTERNAL_API
+#endif // MOZ_NUWA_PROCESS
