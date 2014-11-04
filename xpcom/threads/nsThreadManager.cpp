@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #endif
+#include <sys/types.h>
 
 using namespace mozilla;
 
@@ -78,10 +79,12 @@ struct nsThreadManager::ThreadStatusInfo {
   bool mWorking;
   bool mWillBeWorking;
   bool mIgnored;
+  pid_t mTid;
   ThreadStatusInfo()
     : mWorking(false)
     , mWillBeWorking(false)
     , mIgnored(false)
+    , mTid(gettid())
   {
   }
 };
@@ -474,18 +477,21 @@ nsThreadManager::SetThreadIsWorking(ThreadStatusInfo* aInfo, bool aIsWorking)
     ReentrantMonitorAutoEnter mon(*mMonitor);
     // Get data structure of thread info.
     aInfo->mWorking = aIsWorking;
+    printf_stderr("TEST: checking...\n");
     for (size_t i = 0; i < mThreadStatusInfos.Length(); i++) {
       ThreadStatusInfo *info = mThreadStatusInfos[i];
       if (!info->mIgnored) {
         if (info->mWorking) {
           if (info->mWillBeWorking) {
             hasWorkingThread = true;
-            break;
+            printf_stderr("TEST:   not idle: %d\n", info->mTid);
           }
         }
       }
     }
+    printf_stderr("TEST: end\n");
     if (!hasWorkingThread) {
+      printf_stderr("TEST: notify listeners");
       nsRefPtr<NotifyAllThreadsWereIdle> runnable =
         new NotifyAllThreadsWereIdle(&mThreadsIdledListener);
       NS_DispatchToMainThread(runnable);

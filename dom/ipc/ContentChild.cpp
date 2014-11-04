@@ -2112,6 +2112,7 @@ ContentChild::RecvNuwaCanFreeze()
 {
 #ifdef MOZ_NUWA_PROCESS
     if (IsNuwaProcess()) {
+        printf_stderr("TEST2: nuwa can freeze");
         ContentChild::GetSingleton()->RecvGarbageCollect();
         MessageLoop::current()->PostTask(
             FROM_HERE, NewRunnableFunction(OnFinishNuwaPreparation));
@@ -2505,6 +2506,7 @@ OnNuwaProcessReady()
 {
     mozilla::dom::ContentChild* content =
         mozilla::dom::ContentChild::GetSingleton();
+    printf_stderr("TEST2: Sending nuwa ready.");
     content->SendNuwaReady();
 }
 

@@ -17,6 +17,7 @@
 #include "mozilla/Attributes.h"
 #include "nsAutoPtr.h"
 #include "mozilla/ReentrantMonitor.h"
+#include <sys/types.h>
 
 // A native thread
 class nsThread
@@ -73,7 +74,7 @@ public:
     return mThreadStatusMonitor;
   }
 #endif
-
+  pid_t mTid;
 protected:
   static nsIThreadObserver* sMainThreadObserver;
 

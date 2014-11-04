@@ -28,7 +28,7 @@
 #include "mozilla/Services.h"
 #include "nsXPCOMPrivate.h"
 #include "mozilla/ChaosMode.h"
-
+#include <sys/types.h>
 #ifdef MOZ_CRASHREPORTER
 #include "nsServiceManagerUtils.h"
 #include "nsICrashReporter.h"
@@ -328,6 +328,7 @@ nsThread::ThreadFunc(void* aArg)
 
   // Inform the ThreadManager
   nsThreadManager::get()->RegisterCurrentThread(self);
+  self->mTid = gettid();
 #ifdef MOZ_NUWA_PROCESS
   self->mThreadStatusInfo =
     static_cast<void*>(nsThreadManager::get()->GetCurrentThreadStatusInfo());
@@ -488,6 +489,7 @@ nsThread::InitCurrentThread()
   SetupCurrentThreadForChaosMode();
 
   nsThreadManager::get()->RegisterCurrentThread(this);
+  mTid = gettid();
 #ifdef MOZ_NUWA_PROCESS
   mThreadStatusInfo =
     static_cast<void*>(nsThreadManager::get()->GetCurrentThreadStatusInfo());
@@ -612,6 +614,7 @@ nsThread::GetPRThread(PRThread** aResult)
 NS_IMETHODIMP
 nsThread::Shutdown()
 {
+  printf_stderr("Shutdown: %d", mTid);
   LOG(("THRD(%p) shutdown\n", this));
 
   // XXX If we make this warn, then we hit that warning at xpcom shutdown while
