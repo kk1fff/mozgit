@@ -78,20 +78,11 @@ struct nsThreadManager::ThreadStatusInfo {
   Atomic<bool> mWorking;
   Atomic<bool> mWillBeWorking;
   bool mIgnored;
-  nsThreadManager *mMgr;
-  ThreadStatusInfo(nsThreadManager *aManager)
+  ThreadStatusInfo()
     : mWorking(false)
     , mWillBeWorking(false)
     , mIgnored(false)
-    , mMgr(aManager)
   {
-    ReentrantMonitorAutoEnter mon(*(mMgr->mMonitor));
-    mMgr->mThreadStatusInfos.AppendElement(this);
-  }
-  ~ThreadStatusInfo()
-  {
-    ReentrantMonitorAutoEnter mon(*(mMgr->mMonitor));
-    mMgr->mThreadStatusInfos.RemoveElement(this);
   }
 };
 #endif // MOZ_NUWA_PROCESS
@@ -105,10 +96,20 @@ ReleaseObject(void* aData)
 }
 
 #ifdef MOZ_NUWA_PROCESS
-static void
-DeleteThreadStatusInfo(void* aData)
+void
+nsThreadManager::DeleteThreadStatusInfo(void* aData)
 {
-  delete static_cast<nsThreadManager::ThreadStatusInfo*>(aData);
+  nsThreadManager* mgr = nsThreadManager::get();
+  nsThreadManager::ThreadStatusInfo* thrInfo =
+    static_cast<nsThreadManager::ThreadStatusInfo*>(aData);
+  {
+    ReentrantMonitorAutoEnter mon(*(mgr->mMonitor));
+    mgr->mThreadStatusInfos.RemoveElement(thrInfo);
+    if (NS_IsMainThread()) {
+      mgr->mMainThreadStatusInfo = nullptr;
+    }
+  }
+  delete thrInfo;
 }
 #endif
 
@@ -154,8 +155,9 @@ nsThreadManager::Init()
   }
 
 #ifdef MOZ_NUWA_PROCESS
-  if (PR_NewThreadPrivateIndex(&mThreadStatusInfoIndex,
-                               DeleteThreadStatusInfo) == PR_FAILURE) {
+  if (PR_NewThreadPrivateIndex(
+      &mThreadStatusInfoIndex,
+      nsThreadManager::DeleteThreadStatusInfo) == PR_FAILURE) {
     return NS_ERROR_FAILURE;
   }
 #endif // MOZ_NUWA_PROCESS
@@ -329,9 +331,15 @@ nsThreadManager::GetCurrentThreadStatusInfo()
 {
   void* data = PR_GetThreadPrivate(mThreadStatusInfoIndex);
   if (!data) {
-    ThreadStatusInfo *thrInfo = new ThreadStatusInfo(this);
+    ThreadStatusInfo *thrInfo = new ThreadStatusInfo();
     PR_SetThreadPrivate(mThreadStatusInfoIndex, thrInfo);
     data = thrInfo;
+
+    ReentrantMonitorAutoEnter mon(*mMonitor);
+    mThreadStatusInfos.AppendElement(thrInfo);
+    if (NS_IsMainThread()) {
+      mMainThreadStatusInfo = thrInfo;
+    }
   }
 
   return static_cast<ThreadStatusInfo*>(data);
@@ -439,19 +447,21 @@ nsThreadManager::SetIgnoreThreadStatus()
 }
 
 void
-nsThreadManager::SetThreadIdle()
+nsThreadManager::SetThreadIdle(nsIRunnable **aReturnRunnable)
 {
-  SetThreadIsWorking(GetCurrentThreadStatusInfo(), false);
+  SetThreadIsWorking(GetCurrentThreadStatusInfo(), false, aReturnRunnable);
 }
 
 void
 nsThreadManager::SetThreadWorking()
 {
-  SetThreadIsWorking(GetCurrentThreadStatusInfo(), true);
+  SetThreadIsWorking(GetCurrentThreadStatusInfo(), true, nullptr);
 }
 
 void
-nsThreadManager::SetThreadIsWorking(ThreadStatusInfo* aInfo, bool aIsWorking)
+nsThreadManager::SetThreadIsWorking(ThreadStatusInfo* aInfo,
+                                    bool aIsWorking,
+                                    nsIRunnable **aReturnRunnable)
 {
   aInfo->mWillBeWorking = aIsWorking;
   if (mThreadsIdledListeners.Length() > 0) {
@@ -514,24 +524,45 @@ nsThreadManager::SetThreadIsWorking(ThreadStatusInfo* aInfo, bool aIsWorking)
     // treated D as an idle thread already.
 
     bool hasWorkingThread = false;
-    ReentrantMonitorAutoEnter mon(*mMonitor);
-    // Get data structure of thread info.
-    aInfo->mWorking = aIsWorking;
-    for (size_t i = 0; i < mThreadStatusInfos.Length(); i++) {
-      ThreadStatusInfo *info = mThreadStatusInfos[i];
-      if (!info->mIgnored) {
-        if (info->mWorking) {
-          if (info->mWillBeWorking) {
-            hasWorkingThread = true;
-            break;
+    nsRefPtr<NotifyAllThreadsWereIdle> runnable;
+    {
+      ReentrantMonitorAutoEnter mon(*mMonitor);
+      // Get data structure of thread info.
+      aInfo->mWorking = aIsWorking;
+      if (aIsWorking) {
+        // We are working, so there's no need to check futher.
+        return;
+      }
+
+      for (size_t i = 0; i < mThreadStatusInfos.Length(); i++) {
+        ThreadStatusInfo *info = mThreadStatusInfos[i];
+        if (!info->mIgnored) {
+          if (info->mWorking) {
+            if (info->mWillBeWorking) {
+              hasWorkingThread = true;
+              break;
+            }
           }
         }
       }
+      if (!hasWorkingThread && !mDispatchingToMainThread) {
+        runnable = new NotifyAllThreadsWereIdle(&mThreadsIdledListeners);
+        mDispatchingToMainThread = true;
+      }
     }
-    if (!hasWorkingThread) {
-      nsRefPtr<NotifyAllThreadsWereIdle> runnable =
-        new NotifyAllThreadsWereIdle(&mThreadsIdledListeners);
-      NS_DispatchToMainThread(runnable);
+
+    if (runnable) {
+      if (NS_IsMainThread()) {
+        // We are in main thread's |nsThread::mThreadStatusMonitor|. Dispatching
+        // a task to ourself put us in dangerous of forming deadlock. Returning
+        // the task and let our caller to dispatch for us.
+        MOZ_ASSERT(aReturnRunnable,
+                   "aReturnRunnable must be provided on main thread");
+        runnable.forget(aReturnRunnable);
+      } else {
+        NS_DispatchToMainThread(runnable);
+        ResetIsDispatchingToMainThread();
+      }
     }
   } else {
     // Update thread info without holding any lock.
@@ -539,6 +570,12 @@ nsThreadManager::SetThreadIsWorking(ThreadStatusInfo* aInfo, bool aIsWorking)
   }
 }
 
+void
+nsThreadManager::ResetIsDispatchingToMainThread()
+{
+  ReentrantMonitorAutoEnter mon(*mMonitor);
+  mDispatchingToMainThread = false;
+}
 
 void
 nsThreadManager::AddAllThreadsWereIdleListener(AllThreadsWereIdleListener *listener)

@@ -858,11 +858,23 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult)
   --mRunningEvent;
 
 #ifdef MOZ_NUWA_PROCESS
+  nsCOMPtr<nsIRunnable> notifyAllIdleRunnable;
   {
     ReentrantMonitorAutoEnter mon(mThreadStatusMonitor);
     if ((!mEvents->GetEvent(false, nullptr)) && (mRunningEvent == 0)) {
-      SetIdle();
+      nsThreadManager::get()->SetThreadIsWorking(
+        static_cast<nsThreadManager::ThreadStatusInfo*>(mThreadStatusInfo),
+        false, getter_AddRefs(notifyAllIdleRunnable));
     }
+  }
+  if (notifyAllIdleRunnable) {
+    // Dispatching a task leads us to acquire |mLock| of the thread. If we
+    // dispatch to main thread while holding main thread's
+    // |mThreadStatusMonitor|, deadlock could happen if other thread is
+    // blocked by main thread's |mThreadStatusMonitor| and is holding
+    // main thread's |mLock|.
+    Dispatch(notifyAllIdleRunnable, NS_DISPATCH_NORMAL);
+    nsThreadManager::get()->ResetIsDispatchingToMainThread();
   }
 #endif // MOZ_NUWA_PROCESS
 
@@ -1080,14 +1092,16 @@ void
 nsThread::SetWorking()
 {
   nsThreadManager::get()->SetThreadIsWorking(
-    static_cast<nsThreadManager::ThreadStatusInfo*>(mThreadStatusInfo), true);
+    static_cast<nsThreadManager::ThreadStatusInfo*>(mThreadStatusInfo),
+    true, nullptr);
 }
 
 void
 nsThread::SetIdle()
 {
   nsThreadManager::get()->SetThreadIsWorking(
-    static_cast<nsThreadManager::ThreadStatusInfo*>(mThreadStatusInfo), false);
+    static_cast<nsThreadManager::ThreadStatusInfo*>(mThreadStatusInfo),
+    false, nullptr);
 }
 #endif
 

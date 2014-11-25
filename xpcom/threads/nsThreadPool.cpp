@@ -208,7 +208,7 @@ nsThreadPool::Run()
           PRIntervalTime delta = timeout - (now - idleSince);
           LOG(("THRD-P(%p) waiting [%d]\n", this, delta));
 #ifdef MOZ_NUWA_PROCESS
-          nsThreadManager::get()->SetThreadIdle();
+          nsThreadManager::get()->SetThreadIdle(nullptr);
 #endif // MOZ_NUWA_PROCESS
           mon.Wait(delta);
         }
