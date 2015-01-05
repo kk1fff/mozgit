@@ -216,8 +216,11 @@ interface nsIDOMTCPSocket : nsISupports
  * Needed to account for multiple possible types that can be provided to
  * the socket callbacks as arguments.
  */
-[scriptable, uuid(b1235064-9a08-4714-ad03-1212e4562803)]
+[scriptable, uuid(4f79c6ed-3b4a-412b-8fc5-5ba6a789b128)]
 interface nsITCPSocketInternal : nsISupports {
+  // Limitation of TCPSocket's buffer size.
+  const unsigned long BUFFER_SIZE = 65536;
+
   // Trigger the callback for |type| and provide a DOMError() object with the given data
   void callListenerError(in DOMString type, in DOMString name);
 
@@ -287,6 +290,22 @@ interface nsITCPSocketInternal : nsISupports {
   //        lastest send() invocation from child.
   void onRecvSendFromChild(in jsval data, in unsigned long byteOffset,
                            in unsigned long byteLength, in unsigned long trackingNumber);
+
+  // Connect existing socket transport to the TCPSocket object.
+  // @param socketTransport
+  //        The socket transport object that will back the TCPSocket.
+  nsIDOMTCPSocket openWithSocketTransport(in DOMString host,
+                                          in unsigned short port,
+                                          in nsISocketTransport socketTransport,
+                                          in bool useSSL,
+                                          in DOMString binaryType);
+};
+
+// Let IPC classes can pass native objects without having to
+// transform to JSObject first.
+[uuid(bb2289bc-7dfa-485a-aa88-09ae1ddd0248)]
+interface nsITCPSocketInternalNative : nsITCPSocketInternal {
+  void callListenerNativeArray([array, size_is(len)] in octet buf, in unsigned long len);
 };
 
 /**

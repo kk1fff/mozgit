@@ -36,7 +36,7 @@ const kCLOSING = 'closing';
 const kCLOSED = 'closed';
 const kRESUME_ERROR = 'Calling resume() on a connection that was not suspended.';
 
-const BUFFER_SIZE = 65536;
+const BUFFER_SIZE = Ci.nsITCPSocketInternal.BUFFER_SIZE;
 const NETWORK_STATS_THRESHOLD = 65536;
 
 // XXX we have no TCPError implementation right now because it's really hard to
@@ -605,6 +605,52 @@ TCPSocket.prototype = {
     let transport = that._transport = this._createTransport(host, port, that._ssl);
     transport.setEventSink(that, Services.tm.currentThread);
     that._initStream(that._binaryType);
+
+#ifdef MOZ_WIDGET_GONK
+    // Set _activeNetwork, which is only required for network statistics.
+    // Note that nsINetworkManager, as well as nsINetworkStatsServiceProxy, is
+    // Gonk-specific.
+    let networkManager = Cc["@mozilla.org/network/manager;1"].getService(Ci.nsINetworkManager);
+    if (networkManager) {
+      that._activeNetwork = networkManager.active;
+    }
+#endif
+
+    return that;
+  },
+
+  /**
+   * Open input/output stream for the socket transport.
+   */
+  openWithSocketTransport: function(host, port,
+                                    socketTransport,
+                                    useSSL, binaryType) {
+    this._inChild = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime)
+                       .processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+    if (this._inChild) {
+      // This function is not allowed to be called in child.
+      throw new Error("openWithExistSocketTransport can only be invoked in chrome process\n");
+    }
+
+    let that = new TCPSocket();
+
+    that.useWin = this.useWin;
+    that.innerWindowID = this.innerWindowID;
+    that._inChild = this._inChild;
+
+    LOG("window init: " + that.innerWindowID);
+    Services.obs.addObserver(that, "inner-window-destroyed", true);
+
+    LOG("startup called");
+    LOG("Host info: " + host + ":" + port);
+
+    that._readyState = kCONNECTING;
+    that._host = host;
+    that._port = port;
+
+    let transport = that._transport = socketTransport;
+    transport.setEventSink(that, Services.tm.currentThread);
+    that._initStream(binaryType);
 
 #ifdef MOZ_WIDGET_GONK
     // Set _activeNetwork, which is only required for network statistics.
