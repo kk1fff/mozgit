@@ -71,6 +71,9 @@
 #include "GeckoTouchDispatcher.h"
 #endif
 
+namespace {
+uint64_t sEndTime;
+}
 namespace mozilla {
 namespace layers {
 
@@ -662,7 +665,7 @@ CompositorParent::PauseComposition()
     mPaused = true;
 
     mCompositor->Pause();
-    DidComposite();
+    DidComposite(PR_Now());
   }
 
   // if anyone's waiting to make sure that composition really got paused, tell them
@@ -925,7 +928,7 @@ CompositorParent::CompositeToTarget(DrawTarget* aTarget, const nsIntRect* aRect)
 #endif
 
   if (!CanComposite()) {
-    DidComposite();
+    DidComposite(PR_Now());
     return;
   }
 
@@ -967,9 +970,10 @@ CompositorParent::CompositeToTarget(DrawTarget* aTarget, const nsIntRect* aRect)
 #endif
   mLayerManager->SetDebugOverlayWantsNextFrame(false);
   mLayerManager->EndEmptyTransaction();
+  sEndTime = PR_Now();
 
   if (!aTarget) {
-    DidComposite();
+    DidComposite(PR_Now());
   }
 
   if (mLayerManager->DebugOverlayWantsNextFrame()) {
@@ -1074,7 +1078,7 @@ CompositorParent::ShadowLayersUpdated(LayerTransactionParent* aLayerTree,
   if (aScheduleComposite) {
     ScheduleComposition();
     if (mPaused) {
-      DidComposite();
+      DidComposite(PR_Now());
     }
     // When testing we synchronously update the shadow tree with the animated
     // values to avoid race conditions when calling GetAnimationTransform etc.
@@ -1093,7 +1097,7 @@ CompositorParent::ShadowLayersUpdated(LayerTransactionParent* aLayerTree,
       if (!requestNextFrame) {
         CancelCurrentCompositeTask();
         // Pretend we composited in case someone is waiting for this event.
-        DidComposite();
+        DidComposite(PR_Now());
       }
     }
   }
@@ -1128,7 +1132,7 @@ CompositorParent::SetTestSampleTime(LayerTransactionParent* aLayerTree,
     if (!requestNextFrame) {
       CancelCurrentCompositeTask();
       // Pretend we composited in case someone is wating for this event.
-      DidComposite();
+      DidComposite(PR_Now());
     }
   }
 
@@ -1498,7 +1502,7 @@ public:
 
   virtual AsyncCompositionManager* GetCompositionManager(LayerTransactionParent* aParent) MOZ_OVERRIDE;
 
-  void DidComposite(uint64_t aId);
+  void DidComposite(uint64_t aId, uint64_t aEndTime);
 
 private:
   // Private destructor, to discourage deletion outside of Release():
@@ -1521,10 +1525,10 @@ private:
 };
 
 void
-CompositorParent::DidComposite()
+CompositorParent::DidComposite(uint64_t aEndTime)
 {
   if (mPendingTransaction) {
-    unused << SendDidComposite(0, mPendingTransaction);
+    unused << SendDidComposite(0, mPendingTransaction, sEndTime);
     mPendingTransaction = 0;
   }
 
@@ -1533,7 +1537,7 @@ CompositorParent::DidComposite()
        it != sIndirectLayerTrees.end(); it++) {
     LayerTreeState* lts = &it->second;
     if (lts->mParent == this && lts->mCrossProcessParent) {
-      static_cast<CrossProcessCompositorParent*>(lts->mCrossProcessParent)->DidComposite(it->first);
+      static_cast<CrossProcessCompositorParent*>(lts->mCrossProcessParent)->DidComposite(it->first, aEndTime);
     }
   }
 }
@@ -1722,12 +1726,12 @@ CrossProcessCompositorParent::ShadowLayersUpdated(
 }
 
 void
-CrossProcessCompositorParent::DidComposite(uint64_t aId)
+CrossProcessCompositorParent::DidComposite(uint64_t aId, uint64_t aEndTime)
 {
   sIndirectLayerTreesLock->AssertCurrentThreadOwns();
   LayerTransactionParent *layerTree = sIndirectLayerTrees[aId].mLayerTree;
   if (layerTree && layerTree->GetPendingTransactionId()) {
-    unused << SendDidComposite(aId, layerTree->GetPendingTransactionId());
+    unused << SendDidComposite(aId, layerTree->GetPendingTransactionId(), aEndTime);
     layerTree->SetPendingTransactionId(0);
   }
 }

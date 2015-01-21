@@ -18,8 +18,10 @@ NotifyPaintEvent::NotifyPaintEvent(EventTarget* aOwner,
                                    nsPresContext* aPresContext,
                                    WidgetEvent* aEvent,
                                    uint32_t aEventType,
-                                   nsInvalidateRequestList* aInvalidateRequests)
+                                   nsInvalidateRequestList* aInvalidateRequests,
+                                   uint64_t aEndTime)
   : Event(aOwner, aPresContext, aEvent)
+  , mEndTime(aEndTime)
 {
   if (mEvent) {
     mEvent->message = aEventType;
@@ -54,6 +56,12 @@ NS_IMETHODIMP
 NotifyPaintEvent::GetBoundingClientRect(nsIDOMClientRect** aResult)
 {
   *aResult = BoundingClientRect().take();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+NotifyPaintEvent::GetEventDelay(uint64_t* ret) {
+  *ret = PR_Now() - mEndTime;
   return NS_OK;
 }
 
@@ -92,6 +100,11 @@ NotifyPaintEvent::ClientRects()
   }
 
   return rectList.forget();
+}
+
+uint64_t
+NotifyPaintEvent::EventDelay() {
+  return PR_Now() - mEndTime;
 }
 
 NS_IMETHODIMP
@@ -167,10 +180,11 @@ NS_NewDOMNotifyPaintEvent(nsIDOMEvent** aInstancePtrResult,
                           nsPresContext* aPresContext,
                           WidgetEvent* aEvent,
                           uint32_t aEventType,
-                          nsInvalidateRequestList* aInvalidateRequests) 
+                          nsInvalidateRequestList* aInvalidateRequests,
+                          uint64_t aEndTime) 
 {
   NotifyPaintEvent* it = new NotifyPaintEvent(aOwner, aPresContext, aEvent,
-                                              aEventType, aInvalidateRequests);
+                                              aEventType, aInvalidateRequests, aEndTime);
   NS_ADDREF(it);
   *aInstancePtrResult = static_cast<Event*>(it);
   return NS_OK;

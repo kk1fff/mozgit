@@ -2239,7 +2239,7 @@ nsPresContext::EnsureSafeToHandOutCSSRules()
 }
 
 void
-nsPresContext::FireDOMPaintEvent(nsInvalidateRequestList* aList)
+nsPresContext::FireDOMPaintEvent(nsInvalidateRequestList* aList, uint64_t aEndTime)
 {
   nsPIDOMWindow* ourWindow = mDocument->GetWindow();
   if (!ourWindow)
@@ -2247,6 +2247,7 @@ nsPresContext::FireDOMPaintEvent(nsInvalidateRequestList* aList)
 
   nsCOMPtr<EventTarget> dispatchTarget = do_QueryInterface(ourWindow);
   nsCOMPtr<EventTarget> eventTarget = dispatchTarget;
+#if 0
   if (!IsChrome() && !mSendAfterPaintToContent) {
     // Don't tell the window about this event, it should not know that
     // something happened in a subdocument. Tell only the chrome event handler.
@@ -2257,6 +2258,7 @@ nsPresContext::FireDOMPaintEvent(nsInvalidateRequestList* aList)
       return;
     }
   }
+#endif
   // Events sent to the window get propagated to the chrome event handler
   // automatically.
   nsCOMPtr<nsIDOMEvent> event;
@@ -2264,7 +2266,7 @@ nsPresContext::FireDOMPaintEvent(nsInvalidateRequestList* aList)
   // (hopefully it won't, or we're likely to get an infinite loop! At least
   // it won't be blocking app execution though).
   NS_NewDOMNotifyPaintEvent(getter_AddRefs(event), eventTarget, this, nullptr,
-                            NS_AFTERPAINT, aList);
+                            NS_AFTERPAINT, aList, aEndTime);
   if (!event) {
     return;
   }
@@ -2465,7 +2467,7 @@ NotifyDidPaintSubdocumentCallback(nsIDocument* aDocument, void* aData)
   if (shell) {
     nsPresContext* pc = shell->GetPresContext();
     if (pc) {
-      pc->NotifyDidPaintForSubtree(closure->mFlags);
+      pc->NotifyDidPaintForSubtree(closure->mFlags, PR_Now());
       if (pc->IsDOMPaintEventPending()) {
         closure->mNeedsAnotherDidPaintNotification = true;
       }
@@ -2477,8 +2479,10 @@ NotifyDidPaintSubdocumentCallback(nsIDocument* aDocument, void* aData)
 class DelayedFireDOMPaintEvent : public nsRunnable {
 public:
   DelayedFireDOMPaintEvent(nsPresContext* aPresContext,
-                           nsInvalidateRequestList* aList)
+                           nsInvalidateRequestList* aList,
+                           uint64_t aEndTime)
     : mPresContext(aPresContext)
+    , mEndTime(aEndTime)
   {
     MOZ_ASSERT(mPresContext->GetContainerWeak(),
                "DOMPaintEvent requested for a detached pres context");
@@ -2489,17 +2493,18 @@ public:
     // The pres context might have been detached during the delay -
     // that's fine, just don't fire the event.
     if (mPresContext->GetContainerWeak()) {
-      mPresContext->FireDOMPaintEvent(&mList);
+      mPresContext->FireDOMPaintEvent(&mList, mEndTime);
     }
     return NS_OK;
   }
 
   nsRefPtr<nsPresContext> mPresContext;
   nsInvalidateRequestList mList;
+  uint64_t mEndTime;
 };
 
 void
-nsPresContext::NotifyDidPaintForSubtree(uint32_t aFlags)
+nsPresContext::NotifyDidPaintForSubtree(uint32_t aFlags, uint64_t aEndTime)
 {
   if (IsRoot()) {
     static_cast<nsRootPresContext*>(this)->CancelDidPaintTimer();
@@ -2526,7 +2531,7 @@ nsPresContext::NotifyDidPaintForSubtree(uint32_t aFlags)
   }
   if (aFlags & nsIPresShell::PAINT_COMPOSITE) {
     nsCOMPtr<nsIRunnable> ev =
-      new DelayedFireDOMPaintEvent(this, &mUndeliveredInvalidateRequestsBeforeLastPaint);
+      new DelayedFireDOMPaintEvent(this, &mUndeliveredInvalidateRequestsBeforeLastPaint, aEndTime);
     nsContentUtils::AddScriptRunner(ev);
   }
 
@@ -3090,7 +3095,7 @@ NotifyDidPaintForSubtreeCallback(nsITimer *aTimer, void *aClosure)
   // This is a fallback if we don't get paint events for some reason
   // so we'll just pretend both layer painting and compositing happened.
   presContext->NotifyDidPaintForSubtree(
-      nsIPresShell::PAINT_LAYERS | nsIPresShell::PAINT_COMPOSITE);
+    nsIPresShell::PAINT_LAYERS | nsIPresShell::PAINT_COMPOSITE, PR_Now());
 }
 
 void

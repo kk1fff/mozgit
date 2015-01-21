@@ -69,6 +69,7 @@
 // Min idle notification time in seconds.
 #define MIN_IDLE_NOTIFICATION_TIME_S 1
 
+struct EntryMapStruct;
 class nsIArray;
 class nsIBaseWindow;
 class nsIContent;
@@ -1379,6 +1380,8 @@ public:
 
 public:
   virtual already_AddRefed<nsPIWindowRoot> GetTopWindowRoot() MOZ_OVERRIDE;
+  uint64_t MarkEnd(const nsAString& mark);
+  uint64_t MarkTest(const nsAString& mark);
 
 protected:
   static void NotifyDOMWindowDestroyed(nsGlobalWindow* aWindow);
@@ -1666,6 +1669,7 @@ protected:
 
   static WindowByIdTable* sWindowsById;
   static bool sWarnedAboutWindowInternal;
+  nsTArray<EntryMapStruct*> mEntryTime;
 };
 
 inline nsISupports*

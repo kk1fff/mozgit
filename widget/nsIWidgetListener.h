@@ -130,7 +130,7 @@ public:
    */
   virtual void DidPaintWindow();
 
-  virtual void DidCompositeWindow();
+  virtual void DidCompositeWindow(uint64_t aEndTime);
 
   /**
    * Request that layout schedules a repaint on the next refresh driver tick.

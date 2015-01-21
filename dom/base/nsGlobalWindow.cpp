@@ -255,6 +255,11 @@ static PRLogModuleInfo* gDOMLeakPRLog;
 
 static const char kStorageEnabled[] = "dom.storage.enabled";
 
+struct EntryMapStruct {
+  nsString mEntryName;
+  uint64_t mTime;
+};
+
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::dom::ipc;
@@ -6080,12 +6085,72 @@ nsGlobalWindow::GetFullScreen(bool* aFullScreen)
 }
 
 NS_IMETHODIMP
+nsGlobalWindow::MarkStart(const nsAString& entry)
+{
+  for (size_t i = 0; i < mEntryTime.Length(); ++i) {
+    if (mEntryTime[i]->mEntryName.Equals(entry)) {
+      mEntryTime[i]->mTime = PR_Now();
+      return NS_OK;
+    }
+  }
+  EntryMapStruct *ent = new EntryMapStruct();
+  ent->mEntryName = entry;
+  ent->mTime = PR_Now();
+  mEntryTime.AppendElement(ent);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsGlobalWindow::MarkTest(const nsAString& entry, uint64_t *ret) {
+  for (size_t i = 0; i < mEntryTime.Length(); ++i) {
+    if (mEntryTime[i]->mEntryName.Equals(entry)) {
+      *ret = PR_Now() - mEntryTime[i]->mTime;
+      return NS_OK;
+    }
+  }
+  return NS_ERROR_FAILURE;
+}
+
+uint64_t
+nsGlobalWindow::MarkTest(const nsAString& entry) {
+  uint64_t r = 0;
+  MarkTest(entry, &r);
+  return r;
+}
+
+NS_IMETHODIMP
+nsGlobalWindow::MarkEnd(const nsAString& entry, uint64_t* ret) {
+  // linear serach
+  for (size_t i = 0; i < mEntryTime.Length(); ++i) {
+    if (mEntryTime[i]->mEntryName.Equals(entry)) {
+      EntryMapStruct *ent = mEntryTime[i];
+      *ret = PR_Now() - mEntryTime[i]->mTime;
+      mEntryTime.RemoveElementAt(i);
+      delete ent;
+      return NS_OK;
+    }
+  }
+  return NS_OK;
+}
+
+uint64_t
+nsGlobalWindow::MarkEnd(const nsAString& entry) {
+  uint64_t r;
+  MarkEnd(entry, &r);
+  return r;
+}
+
+NS_IMETHODIMP
 nsGlobalWindow::Dump(const nsAString& aStr)
 {
   if (!nsContentUtils::DOMWindowDumpEnabled()) {
     return NS_OK;
   }
 
+  if (aStr.EqualsLiteral("xxxx")) {
+    printf_stderr("--------------- xxxx");
+  }
+  
   char *cstr = ToNewUTF8String(aStr);
 
 #if defined(XP_MACOSX)

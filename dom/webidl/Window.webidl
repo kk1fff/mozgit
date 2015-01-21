@@ -85,6 +85,10 @@ typedef any Transferable;
   [Throws, CrossOriginCallable] void postMessage(any message, DOMString targetOrigin, optional sequence<Transferable> transfer);
 
   // also has obsolete members
+
+  void markStart(DOMString entry);
+  unsigned long long markEnd(DOMString entry);
+  unsigned long long markTest(DOMString entry);
 };
 Window implements GlobalEventHandlers;
 Window implements WindowEventHandlers;

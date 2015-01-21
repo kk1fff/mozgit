@@ -68,7 +68,9 @@ public:
   virtual bool RecvOverfill(const uint32_t &aOverfill) MOZ_OVERRIDE;
   void AddOverfillObserver(ClientLayerManager* aLayerManager);
 
-  virtual bool RecvDidComposite(const uint64_t& aId, const uint64_t& aTransactionId) MOZ_OVERRIDE;
+  virtual bool RecvDidComposite(const uint64_t& aId,
+                                const uint64_t& aTransactionId,
+                                const uint64_t& aEndTime) MOZ_OVERRIDE;
 
   /**
    * Request that the parent tell us when graphics are ready on GPU.

@@ -364,7 +364,7 @@ protected:
    */
   bool CanComposite();
 
-  void DidComposite();
+  void DidComposite(uint64_t aEndTime);
 
   nsRefPtr<LayerManagerComposite> mLayerManager;
   nsRefPtr<Compositor> mCompositor;

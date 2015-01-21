@@ -28,7 +28,8 @@ public:
                    nsPresContext* aPresContext,
                    WidgetEvent* aEvent,
                    uint32_t aEventType,
-                   nsInvalidateRequestList* aInvalidateRequests);
+                   nsInvalidateRequestList* aInvalidateRequests,
+                   uint64_t aEndTime);
 
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -54,6 +55,7 @@ public:
 
   already_AddRefed<PaintRequestList> PaintRequests();
 
+  uint64_t EventDelay();
 protected:
   ~NotifyPaintEvent() {}
 
@@ -61,6 +63,7 @@ private:
   nsRegion GetRegion();
 
   nsTArray<nsInvalidateRequestList::Request> mInvalidateRequests;
+  const uint64_t mEndTime;
 };
 
 } // namespace dom

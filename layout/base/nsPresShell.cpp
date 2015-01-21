@@ -6158,7 +6158,7 @@ public:
   }
   ~nsAutoNotifyDidPaint()
   {
-    mShell->GetPresContext()->NotifyDidPaintForSubtree(mFlags);
+    mShell->GetPresContext()->NotifyDidPaintForSubtree(mFlags, PR_Now());
   }
 
 private:

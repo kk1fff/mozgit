@@ -102,7 +102,7 @@ nsIWidgetListener::DidPaintWindow()
 }
 
 void
-nsIWidgetListener::DidCompositeWindow()
+nsIWidgetListener::DidCompositeWindow(uint64_t aEndTime)
 {
 }
 

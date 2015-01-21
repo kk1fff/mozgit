@@ -5,10 +5,12 @@
 
 #include "domstubs.idl"
 
-[scriptable, uuid(4237c376-d637-4b6e-9f8a-1da57e867834)]
+[scriptable, uuid(f5db9125-be72-4d6b-bafd-2f8f5505b67f)]
 interface nsIDOMJSWindow : nsISupports
 {
   void                      dump(in DOMString str);
+  // void markStart(in DOMString entry);
+  // unsigned long long markEnd(in DOMString entry);
 
   /**
    * These methods take typeless arguments and optional arguments, the

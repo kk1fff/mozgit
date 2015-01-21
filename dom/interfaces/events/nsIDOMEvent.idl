@@ -336,7 +336,8 @@ NS_NewDOMNotifyPaintEvent(nsIDOMEvent** aResult,
                           nsPresContext* aPresContext,
                           mozilla::WidgetEvent* aEvent,
                           uint32_t aEventType = 0,
-                          nsInvalidateRequestList* aInvalidateRequests = nullptr);
+                          nsInvalidateRequestList* aInvalidateRequests = nullptr,
+                          uint64_t aEndTime = 0);
 nsresult
 NS_NewDOMSimpleGestureEvent(nsIDOMEvent** aInstancePtrResult,
                             mozilla::dom::EventTarget* aOwner,

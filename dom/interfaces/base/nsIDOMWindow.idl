@@ -482,6 +482,10 @@ interface nsIDOMWindow : nsISupports
    * Console API
    */
   [implicit_jscontext] attribute jsval console;
+
+  void markStart(in DOMString entry);
+  unsigned long long markEnd(in DOMString entry);
+  unsigned long long markTest(in DOMString entry);
 };
 
 /**

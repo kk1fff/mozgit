@@ -25,7 +25,6 @@ namespace dom {
   class PerformanceEntry;
 }
 }
-
 // Script "performance.timing" object
 class nsPerformanceTiming MOZ_FINAL : public nsWrapperCache
 {

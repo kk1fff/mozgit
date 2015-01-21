@@ -1058,12 +1058,12 @@ nsView::DidPaintWindow()
 }
 
 void
-nsView::DidCompositeWindow()
+nsView::DidCompositeWindow(uint64_t aEndTime)
 {
   nsIPresShell* presShell = mViewManager->GetPresShell();
   if (presShell) {
     nsAutoScriptBlocker scriptBlocker;
-    presShell->GetPresContext()->GetDisplayRootPresContext()->GetRootPresContext()->NotifyDidPaintForSubtree(nsIPresShell::PAINT_COMPOSITE);
+    presShell->GetPresContext()->GetDisplayRootPresContext()->GetRootPresContext()->NotifyDidPaintForSubtree(nsIPresShell::PAINT_COMPOSITE, aEndTime);
   }
 }
 
