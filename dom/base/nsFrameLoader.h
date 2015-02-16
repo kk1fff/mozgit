@@ -54,6 +54,8 @@ typedef struct _GtkWidget GtkWidget;
 class QX11EmbedContainer;
 #endif
 
+class PendingMessageQueue;
+
 class nsFrameLoader final : public nsIFrameLoader,
                             public nsStubMutationObserver,
                             public mozilla::dom::ipc::MessageManagerCallback
@@ -380,6 +382,53 @@ private:
   uint32_t mEventMode;
 
   nsCOMPtr<nsIRunnable> mDelayedStartLoadingRunnable;
+  nsRefPtr<PendingMessageQueue> mPendingMessages;
+};
+
+class PendingMessageQueue {
+public:
+  static PendingMessageQueue* Get(const nsAString& aManifestURL);
+
+  // Put a message into queue: |aCallback| points to the object
+  // the handles the messages.
+  void QueueMessage(JSContext* aCx,
+                    const nsAString& aMessage,
+                    const mozilla::dom::StructuredCloneData& aData,
+                    JS::Handle<JSObject *> aCpows,
+                    nsIPrincipal* aPrincipal,
+                    nsFrameLoader* aFrameLoader);
+
+  // Remove all message that is going to send through |aFrameLoader| object.
+  // This is called when |aFrameLoader| is being destroyed. 
+  void RemoveMessagesOfFrameLoader(nsFrameLoader* aFrameLoader);
+
+  // Deliver the messages. Process messages don't have a target when they
+  // were queued, thus a pointer to content parent need to be supplied.
+  // Every nsFrameLoader which have a reference of this instance is expected to
+  // call this method when its remote frame is ready.
+  // There could be 3 kinds of messages in the queue: frame messages whose
+  // frames are ready to deliver to remote, frame messages whose frames are
+  // ready to deliver to remote and process messages. For process messages and
+  // messages whose frame is ready to deliver the message, we are free to
+  // deliver them. Once we found we are trying to deliver a frame message whose
+  // frame is not ready, we should stop the whole process and wait for the next
+  // call. When the frame which stops us ready, it will call SendQueueMessage
+  // again.
+  void SendQueuedMessages(mozilla::dom::ContentParent* aContentParent);
+
+  NS_INLINE_DECL_REFCOUNTING(PendingMessageQueue)
+
+private:
+  struct QueuedMessage;
+
+  PendingMessageQueue(const nsAString& aManifestURL);
+  ~PendingMessageQueue();
+  void AddToProcessMessageManager();
+  void RemoveFromProcessMessageManager();
+
+  nsTArray<QueuedMessage> mQueuedMessage;
+  nsString mManifestURL;
+  bool mAddedToProcessMessageManager;
 };
 
 #endif
