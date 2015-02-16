@@ -150,6 +150,159 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsFrameLoader)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIFrameLoader)
 NS_INTERFACE_MAP_END
 
+namespace {
+nsDataHashtable<nsStringHashKey, PendingMessageQueue*> gProcessMessageQueues;
+}
+// Holds Frame messages that are sending to a target which
+// has't yet been created.
+struct PendingMessageQueue::QueuedMessage
+{
+  struct MOZ_STACK_CLASS ConstructParameter
+  {
+    const nsAString& mMessage;
+    const StructuredCloneData& mData;
+    JSContext* const mCx;
+    JS::Handle<JSObject*>& mCpows;
+    nsIPrincipal* const mPrincipal;
+    nsFrameLoader* mFrameLoader;
+  };
+
+  struct MOZ_STACK_CLASS PointerComparator {
+    bool Equals(const QueuedMessage& aMsg,
+                const MessageManagerCallback* aFrameLoader) const
+    {
+      return aMsg.mFrameLoader == aFrameLoader;
+    }
+  };
+
+  QueuedMessage(const ConstructParameter aParam)
+    : mMessage(aParam.mMessage)
+    , mCpows(aParam.mCx, aParam.mCpows)
+    , mPrincipal(aParam.mPrincipal)
+    , mFrameLoader(aParam.mFrameLoader)
+  {
+    if (aParam.mData.mData) {
+      mDataBuffer = MakeUnique<uint64_t[]>(aParam.mData.mDataLength);
+      memcpy(mDataBuffer.get(), aParam.mData.mData,
+             sizeof(uint64_t) * aParam.mData.mDataLength);
+    }
+    mData.mData = mDataBuffer.get();
+    mData.mDataLength = aParam.mData.mDataLength;
+    mData.mClosure = aParam.mData.mClosure;
+  }
+
+  nsString mMessage;
+  StructuredCloneData mData;
+  JS::PersistentRooted<JSObject*> mCpows;
+  nsCOMPtr<nsIPrincipal> mPrincipal;
+
+  // A strong reference to the target frame. Cycle reference froms when a
+  // mFrameLoader queues a message. And the cycle is broken when following
+  // occurs:
+  // 1. When the frame's |Destroy| is called before its remote frame created,
+  //    the frame cleans all items it sent.
+  // 2. When frame's corresponding remote frame is opened, it cleans reference
+  //    to PendingMessageQueue.
+  nsRefPtr<nsFrameLoader> mFrameLoader;
+private:
+  UniquePtr<uint64_t[]> mDataBuffer; // Holds data that mData.mData points to.
+};
+
+PendingMessageQueue*
+PendingMessageQueue::Get(const nsAString& aManifestURL)
+{
+  PendingMessageQueue *pmq = gProcessMessageQueues.Get(aManifestURL);
+  if (!pmq) {
+    pmq = new PendingMessageQueue(aManifestURL);
+  }
+  return pmq;
+}
+
+PendingMessageQueue::PendingMessageQueue(
+    const nsAString& aManifestURL)
+  : mManifestURL(aManifestURL)
+  , mAddedToProcessMessageManager(false)
+{
+  AddToProcessMessageManager();
+  gProcessMessageQueues.Put(mManifestURL, this);
+}
+
+PendingMessageQueue::~PendingMessageQueue()
+{
+  // If process is not launched successfully before all nsFrameLoaders are
+  // destroyed, we will be left in process message manager.
+  RemoveFromProcessMessageManager();
+  gProcessMessageQueues.Remove(mManifestURL);
+}
+
+void PendingMessageQueue::QueueMessage(JSContext* aCx,
+                                       const nsAString& aMessage,
+                                       const StructuredCloneData& aData,
+                                       JS::Handle<JSObject *> aCpows,
+                                       nsIPrincipal* aPrincipal,
+                                       nsFrameLoader* aFrameLoader)
+{
+  mQueuedMessage.AppendElement(
+      QueuedMessage::ConstructParameter{
+        aMessage, aData, aCx, aCpows, aPrincipal, aFrameLoader });
+}
+
+void PendingMessageQueue::RemoveMessagesOfFrameLoader(nsFrameLoader* aFrameLoader)
+{
+  while (mQueuedMessage.RemoveElement(aFrameLoader, QueuedMessage::PointerComparator()));
+}
+
+void PendingMessageQueue::SendQueuedMessages(ContentParent* aContentParent)
+{
+  MOZ_ASSERT(aContentParent, "Invalid argument");
+  for (size_t i = 0; i < mQueuedMessage.Length(); ++i) {
+    nsFrameLoader* frameLoader = mQueuedMessage[i].mFrameLoader;
+    if (frameLoader && !frameLoader->GetRemoteBrowser()) {
+      // The frameloader hasn't been ready. Stop here.
+      mQueuedMessage.RemoveElementsAt(0, i); // Remove sent message.
+      return;
+    }
+
+    MessageManagerCallback* callback;
+    if (frameLoader) {
+      callback = frameLoader;
+    } else {
+      callback = aContentParent;
+    }
+    AutoJSAPI jsapi;
+    if (NS_WARN_IF(!jsapi.Init(mQueuedMessage[i].mCpows))) {
+      continue;
+    }
+    callback->DoSendAsyncMessage(jsapi.cx(),
+                                 mQueuedMessage[i].mMessage,
+                                 mQueuedMessage[i].mData,
+                                 mQueuedMessage[i].mCpows,
+                                 mQueuedMessage[i].mPrincipal);
+  }
+
+  // All message are sent.
+  mQueuedMessage.Clear();
+  RemoveFromProcessMessageManager();
+}
+
+void PendingMessageQueue::AddToProcessMessageManager()
+{
+  if (!mAddedToProcessMessageManager) {
+    nsFrameMessageManager::GetParentProcessManager()->
+      AddPendingMessageQueue(this);
+    mAddedToProcessMessageManager = true;
+  }
+}
+
+void PendingMessageQueue::RemoveFromProcessMessageManager()
+{
+  if (mAddedToProcessMessageManager) {
+    nsFrameMessageManager::GetParentProcessManager()->
+      RemovePendingMessageQueue(this);
+    mAddedToProcessMessageManager = false;
+  }
+}
+
 nsFrameLoader::nsFrameLoader(Element* aOwner, bool aNetworkCreated)
   : mOwnerContent(aOwner)
   , mAppIdSentToPermissionManager(nsIScriptSecurityManager::NO_APP_ID)
@@ -385,6 +538,14 @@ nsFrameLoader::ReallyStartLoadingInternal()
         ContentParent::AddRunAfterPreallocatedProcessReady(
           mDelayedStartLoadingRunnable);
 
+        // Before preallocated process is created, we setup a queue to keep all asynchronous
+        // messages.
+        if (!mPendingMessages) {
+          nsAutoString manifestUrl;
+          GetOwnerAppManifestURL(manifestUrl);
+          mPendingMessages = PendingMessageQueue::Get(manifestUrl);
+        }
+
         // Init browser API before content process created. Call to
         // browser methods are queued in browser element parent.
         return NS_OK;
@@ -395,6 +556,14 @@ nsFrameLoader::ReallyStartLoadingInternal()
       if (!mRemoteBrowser) {
         NS_WARNING("Couldn't create child process for iframe.");
         return NS_ERROR_FAILURE;
+      }
+
+      // If we queued messages before process ready, it's our chance to
+      // resend.
+      if (mPendingMessages) {
+        ContentParent* cp = static_cast<ContentParent*>(mRemoteBrowser->Manager());
+        mPendingMessages->SendQueuedMessages(cp);
+        mPendingMessages = nullptr;
       }
     }
 
@@ -1388,6 +1557,10 @@ nsFrameLoader::Destroy()
   }
   mDestroyCalled = true;
 
+  if (mPendingMessages) {
+    mPendingMessages->RemoveMessagesOfFrameLoader(this);
+  }
+
   if (mMessageManager) {
     mMessageManager->Disconnect();
   }
@@ -2373,18 +2546,30 @@ nsFrameLoader::DoSendAsyncMessage(JSContext* aCx,
                                   nsIPrincipal* aPrincipal)
 {
   TabParent* tabParent = mRemoteBrowser;
-  if (tabParent) {
-    ClonedMessageData data;
-    nsIContentParent* cp = tabParent->Manager();
-    if (!BuildClonedMessageDataForParent(cp, aData, data)) {
-      return false;
+  if (mRemoteFrame) {
+    if (!tabParent) {
+      // Before preallocated process is created, we setup a queue to keep all asynchronous
+      // messages.
+      if (!mPendingMessages) {
+        nsAutoString manifestUrl;
+        GetOwnerAppManifestURL(manifestUrl);
+        mPendingMessages = PendingMessageQueue::Get(manifestUrl);
+      }
+      mPendingMessages->QueueMessage(aCx, aMessage, aData, aCpows, aPrincipal, this);
+      return true;
+    } else {
+      ClonedMessageData data;
+      nsIContentParent* cp = tabParent->Manager();
+      if (!BuildClonedMessageDataForParent(cp, aData, data)) {
+        return false;
+      }
+      InfallibleTArray<mozilla::jsipc::CpowEntry> cpows;
+      if (aCpows && ! cp->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
+        return false;
+      }
+      return tabParent->SendAsyncMessage(nsString(aMessage), data, cpows,
+                                         IPC::Principal(aPrincipal));
     }
-    InfallibleTArray<mozilla::jsipc::CpowEntry> cpows;
-    if (aCpows && !cp->GetCPOWManager()->Wrap(aCx, aCpows, &cpows)) {
-      return false;
-    }
-    return tabParent->SendAsyncMessage(nsString(aMessage), data, cpows,
-                                       IPC::Principal(aPrincipal));
   }
 
   if (mChildMessageManager) {

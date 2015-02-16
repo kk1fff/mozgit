@@ -669,6 +669,13 @@ nsFrameMessageManager::DispatchAsyncMessageInternal(JSContext* aCx,
       static_cast<nsFrameMessageManager*>(mChildManagers[i])->
          DispatchAsyncMessageInternal(aCx, aMessage, aData, aCpows, aPrincipal);
     }
+
+    len = mPendingMessageQueues.Length();
+    for (int32_t i = 0; i < len; ++i) {
+      mPendingMessageQueues[i]->QueueMessage(aCx, aMessage, aData,
+                                             aCpows, aPrincipal, nullptr);
+    }
+
     return NS_OK;
   }
 
@@ -1106,6 +1113,18 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
                                                          aIsSync, aCloneData,
                                                          aCpows, aPrincipal,
                                                          aJSONRetVal) : NS_OK;
+}
+
+void
+nsFrameMessageManager::AddPendingMessageQueue(PendingMessageQueue* aQueue)
+{
+  mPendingMessageQueues.AppendElement(aQueue);
+}
+
+void
+nsFrameMessageManager::RemovePendingMessageQueue(PendingMessageQueue* aQueue)
+{
+  mPendingMessageQueues.RemoveElement(aQueue);
 }
 
 void

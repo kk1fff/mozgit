@@ -29,6 +29,8 @@
 #include "nsTObserverArray.h"
 #include "mozilla/dom/StructuredCloneUtils.h"
 
+class PendingMessageQueue;
+
 namespace mozilla {
 namespace dom {
 
@@ -232,6 +234,9 @@ public:
                           CpowHolder* aCpows, nsIPrincipal* aPrincipal,
                           InfallibleTArray<nsString>* aJSONRetVal);
 
+  void AddPendingMessageQueue(PendingMessageQueue* aQueue);
+  void RemovePendingMessageQueue(PendingMessageQueue* aQueue);
+
   void AddChildManager(nsFrameMessageManager* aManager);
   void RemoveChildManager(nsFrameMessageManager* aManager)
   {
@@ -321,6 +326,7 @@ private:
   nsresult AssertProcessInternal(ProcessCheckerType aType,
                                  const nsAString& aCapability,
                                  bool* aValid);
+  nsTArray<PendingMessageQueue*> mPendingMessageQueues;
 };
 
 /* A helper class for taking care of many details for async message sending
