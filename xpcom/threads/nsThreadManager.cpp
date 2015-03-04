@@ -81,7 +81,7 @@ struct nsThreadManager::ThreadStatusInfo {
   ThreadStatusInfo()
     : mWorking(false)
     , mWillBeWorking(false)
-    , mIgnored(false)
+    , mIgnored(true)
   {
   }
 };
@@ -441,9 +441,9 @@ nsThreadManager::GetHighestNumberOfThreads()
 
 #ifdef MOZ_NUWA_PROCESS
 void
-nsThreadManager::SetIgnoreThreadStatus()
+nsThreadManager::SetReportingThreadStatus()
 {
-  GetCurrentThreadStatusInfo()->mIgnored = true;
+  GetCurrentThreadStatusInfo()->mIgnored = false;
 }
 
 void

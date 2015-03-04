@@ -865,10 +865,10 @@ NS_SetMainThread();
 #ifdef MOZILLA_INTERNAL_API
 #ifdef MOZ_NUWA_PROCESS
 extern void
-NS_SetIgnoreStatusOfCurrentThread();
+NS_SetReportingStatusOfCurrentThread();
 #else // MOZ_NUWA_PROCESS
 inline void
-NS_SetIgnoreStatusOfCurrentThread()
+NS_SetReportingStatusOfCurrentThread()
 {
 }
 #endif // MOZ_NUWA_PROCESS

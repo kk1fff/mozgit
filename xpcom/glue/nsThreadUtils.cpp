@@ -378,8 +378,8 @@ nsAutoLowPriorityIO::~nsAutoLowPriorityIO()
 #ifdef MOZ_NUWA_PROCESS
 #ifdef MOZILLA_INTERNAL_API
 void
-NS_SetIgnoreStatusOfCurrentThread() {
-  nsThreadManager::get()->SetIgnoreThreadStatus();
+NS_SetReportingStatusOfCurrentThread() {
+  nsThreadManager::get()->SetReportingThreadStatus();
 }
 #endif // MOZILLA_INTERNAL_API
 #endif // MOZ_NUWA_PROCESS
