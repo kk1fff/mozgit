@@ -24,6 +24,11 @@
 #define DEFAULT_ALLOCATE_DELAY 1000
 #define NUWA_FORK_WAIT_DURATION_MS 2000 // 2 seconds.
 
+// If Nuwa isn't ready after DIRECT_FORK_THRESHOLD, the preallocated
+// process will be created directly from the B2G process.
+#define DIRECT_FORK_THRESHOLD 30000 // 30 secs
+#define DIRECT_FORK_INTERVAL 5000 // 5 secs
+
 using namespace mozilla;
 using namespace mozilla::hal;
 using namespace mozilla::dom;
@@ -82,9 +87,14 @@ public:
 
 private:
   void NuwaFork();
+  void ForkPreallocatedProcessDirectly();
 
   // initialization off the critical path of app startup.
   CancelableTask* mPreallocateAppProcessTask;
+
+  // create a preallocated process if Nuwa couldn't fork one
+  // soon.
+  CancelableTask* mBackupProcessTask;
 
   // The array containing the preallocated processes. 4 as the inline storage size
   // should be enough so we don't need to grow the nsAutoTArray.
@@ -137,6 +147,7 @@ PreallocatedProcessManagerImpl::PreallocatedProcessManagerImpl()
   :
 #ifdef MOZ_NUWA_PROCESS
     mPreallocateAppProcessTask(nullptr)
+  , mBackupProcessTask(nullptr)
   , mIsNuwaReady(false)
   ,
 #endif
@@ -303,6 +314,22 @@ PreallocatedProcessManagerImpl::ScheduleDelayedNuwaFork()
     FROM_HERE, mPreallocateAppProcessTask,
     Preferences::GetUint("dom.ipc.processPrelaunch.delayMs",
                          DEFAULT_ALLOCATE_DELAY));
+  mBackupProcessTask = NewRunnableMethod(
+    this, &PreallocatedProcessManagerImpl::ForkPreallocatedProcessDirectly);
+  MessageLoop::current()->PostDelayedTask(
+    FROM_HERE, mBackupProcessTask, DIRECT_FORK_THRESHOLD);
+}
+
+void
+PreallocatedProcessManagerImpl::ForkPreallocatedProcessDirectly()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  mBackupProcessTask = nullptr;
+
+  if (!IsNuwaReady() && mSpareProcesses.IsEmpty()) {
+    nsRefPtr<ContentParent> preallocated = ContentParent::PreallocateAppProcess();
+    PublishSpareProcess(preallocated);
+  }
 }
 
 void
@@ -337,10 +364,19 @@ PreallocatedProcessManagerImpl::GetSpareProcess()
   nsRefPtr<ContentParent> process = mSpareProcesses.LastElement();
   mSpareProcesses.RemoveElementAt(mSpareProcesses.Length() - 1);
 
-  if (mSpareProcesses.IsEmpty() && mIsNuwaReady) {
-    NS_ASSERTION(mPreallocatedAppProcess != nullptr,
-                 "Nuwa process is not present!");
-    ScheduleDelayedNuwaFork();
+  if (mSpareProcesses.IsEmpty()) {
+    if (mIsNuwaReady) {
+      NS_ASSERTION(mPreallocatedAppProcess != nullptr,
+                   "Nuwa process is not present!");
+      ScheduleDelayedNuwaFork();
+    } else {
+      // There should be a task forking nuwa, we just schedule
+      // a task to see if we need to fork directly later.
+      mBackupProcessTask = NewRunnableMethod(
+        this, &PreallocatedProcessManagerImpl::ForkPreallocatedProcessDirectly);
+      MessageLoop::current()->PostDelayedTask(
+        FROM_HERE, mBackupProcessTask, DIRECT_FORK_INTERVAL);
+    }
   }
 
   return process.forget();
@@ -420,6 +456,11 @@ PreallocatedProcessManagerImpl::OnNuwaReady()
     mozilla::unused << ppmm->BroadcastAsyncMessage(
       NS_LITERAL_STRING("TEST-ONLY:nuwa-ready"),
       JS::NullHandleValue, JS::NullHandleValue, cx, 1);
+  }
+
+  if (mBackupProcessTask) {
+    mBackupProcessTask->Cancel();
+    mBackupProcessTask = nullptr;
   }
   NuwaFork();
 }
