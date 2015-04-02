@@ -28,6 +28,9 @@
 // process will be created directly from the B2G process.
 #define DIRECT_FORK_THRESHOLD 30000 // 30 secs
 #define DIRECT_FORK_INTERVAL 5000 // 5 secs
+#define DIRECT_FORK_ALLOWED_PREF "dom.ipc.processPrelaunch.allowDirectFork"
+
+#define STOP_NUWA_FORK_PREF "dom.ipc.processPrelaunch.stopNuwaFork"
 
 using namespace mozilla;
 using namespace mozilla::hal;
@@ -196,6 +199,19 @@ PreallocatedProcessManagerImpl::RereadPrefs()
   } else {
     Disable();
   }
+#ifdef MOZ_NUWA_PROCESS
+  if (!Preferences::GetBool(DIRECT_FORK_ALLOWED_PREF, true)) {
+    if (mBackupProcessTask) {
+      mBackupProcessTask->Cancel();
+      mBackupProcessTask = nullptr;
+    }
+  }
+  if (!Preferences::GetBool(STOP_NUWA_FORK_PREF, false)) {
+    if (IsNuwaReady()) {
+      ScheduleDelayedNuwaFork();
+    }
+  }
+#endif // MOZ_NUWA_PROCESS
 }
 
 already_AddRefed<ContentParent>
@@ -325,10 +341,12 @@ PreallocatedProcessManagerImpl::ScheduleDelayedNuwaFork()
     FROM_HERE, mPreallocateAppProcessTask,
     Preferences::GetUint("dom.ipc.processPrelaunch.delayMs",
                          DEFAULT_ALLOCATE_DELAY));
-  mBackupProcessTask = NewRunnableMethod(
-    this, &PreallocatedProcessManagerImpl::ForkPreallocatedProcessDirectly);
-  MessageLoop::current()->PostDelayedTask(
-    FROM_HERE, mBackupProcessTask, DIRECT_FORK_THRESHOLD);
+  if (Preferences::GetBool(DIRECT_FORK_ALLOWED_PREF, true)) {
+    mBackupProcessTask = NewRunnableMethod(
+      this, &PreallocatedProcessManagerImpl::ForkPreallocatedProcessDirectly);
+    MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, mBackupProcessTask, DIRECT_FORK_THRESHOLD);
+  }
 }
 
 void
@@ -351,11 +369,6 @@ void
 PreallocatedProcessManagerImpl::DelayedNuwaFork()
 {
   MOZ_ASSERT(NS_IsMainThread());
-
-  if (!mEnabled) {
-    return;
-  }
-
   mPreallocateAppProcessTask = nullptr;
 
   if (!mIsNuwaReady) {
@@ -494,7 +507,9 @@ PreallocatedProcessManagerImpl::PreallocatedProcessReady()
 void
 PreallocatedProcessManagerImpl::NuwaFork()
 {
-  mozilla::unused << mPreallocatedAppProcess->SendNuwaFork();
+  if (!Preferences::GetBool(STOP_NUWA_FORK_PREF, false)) {
+    mozilla::unused << mPreallocatedAppProcess->SendNuwaFork();
+  }
 }
 #endif
 

@@ -1,0 +1,86 @@
+<!DOCTYPE HTML>
+<html>
+<!--
+Test if no process can fork before Nuwa ready.
+-->
+<head>
+  <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
+</head>
+<body>
+
+<script type="application/javascript;version=1.7">
+"use strict";
+
+SimpleTest.waitForExplicitFinish();
+SimpleTest.requestFlakyTimeout("untriaged");
+
+function setPref(pref, value) {
+  return new Promise(function(resolve, reject) {
+    SpecialPowers.pushPrefEnv({'set': [[pref, value]]},
+                              function() { resolve(); });
+  });
+}
+
+function runTest() {
+  return new Promise(function(resolve, reject) {
+    let iframe = document.createElement('iframe');
+    let nuwaStarted = false;
+    iframe.setAttribute('mozbrowser', 'true');
+    document.body.appendChild(iframe);
+    setTimeout(5000, function() {
+      // Wait 5 secs, make sure app process cannot be ready.
+      SpecialPowers.setBoolPref('dom.ipc.processPrelaunch.stopNuwaFork', false);
+      nuwaStarted = true;
+    });
+    iframe.addEventListener('mozbrowserloadstart', function() {
+      ok(nuwaStarted, "Shouldn't get mozbrowserloadstart before nuwa starts");
+      resolve();
+    });
+  })
+}
+
+function prepareTest()
+{
+  return new Promise(function(resolve, reject) {
+    // Shutdown preallocated process.
+    SpecialPowers.setBoolPref('dom.ipc.processPrelaunch.enabled', false);
+    let cpmm = SpecialPowers.Cc["@mozilla.org/childprocessmessagemanager;1"]
+        .getService(SpecialPowers.Ci.nsISyncMessageSender);
+    let msgHandler = {
+      receiveMessage: function receiveMessage(msg) {
+        msg = SpecialPowers.wrap(msg);
+        if (msg.name == 'TEST-ONLY:nuwa-ready') {
+          ok(true, "Got nuwa-ready");
+          prepareDone();
+        }
+      }
+    };
+
+    function prepareDone() {
+      cpmm.removeMessageListener("TEST-ONLY:nuwa-ready", msgHandler);
+      resolve();
+    }
+    
+    cpmm.addMessageListener("TEST-ONLY:nuwa-ready", msgHandler);
+    
+    // Setting this pref to true should cause us to prelaunch a process.
+    SpecialPowers.setBoolPref('dom.ipc.processPrelaunch.stopNuwaFork', true);
+    SpecialPowers.setBoolPref('dom.ipc.processPrelaunch.enabled', true);
+  });
+}
+
+window.addEventListener('load', function() {
+  setPref('dom.ipc.processPriorityManager.testMode', true)
+  .then(setPref('dom.ipc.processPriorityManager.enabled', true))
+  .then(setPref('dom.ipc.processPrelaunch.allowDirectFork', false))
+  .then(prepareTest)
+  .then(runTest)
+  .then(function() {
+    SimpleTest.finish();
+  });
+})
+
+</script>
+</body>
+</html>
