@@ -207,6 +207,13 @@ PreallocatedProcessManagerImpl::Take()
 void
 PreallocatedProcessManagerImpl::Enable()
 {
+#ifdef MOZ_NUWA_PROCESS
+  // Nuwa is not expected to running in XPCShell tests.
+  if (PR_GetEnv("XPCSHELL_TEST_PROFILE_DIR")) {
+    return;
+  }
+#endif
+
   if (mEnabled) {
     return;
   }
@@ -303,6 +310,10 @@ PreallocatedProcessManagerImpl::ScheduleDelayedNuwaFork()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  if (!mEnabled) {
+    return;
+  }
+  
   if (mPreallocateAppProcessTask) {
     // Make sure there is only one request running.
     return;
@@ -326,6 +337,10 @@ PreallocatedProcessManagerImpl::ForkPreallocatedProcessDirectly()
   MOZ_ASSERT(NS_IsMainThread());
   mBackupProcessTask = nullptr;
 
+  if (!mEnabled) {
+    return;
+  }
+
   if (!IsNuwaReady() && mSpareProcesses.IsEmpty()) {
     nsRefPtr<ContentParent> preallocated = ContentParent::PreallocateAppProcess();
     PublishSpareProcess(preallocated);
@@ -336,6 +351,10 @@ void
 PreallocatedProcessManagerImpl::DelayedNuwaFork()
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  if (!mEnabled) {
+    return;
+  }
 
   mPreallocateAppProcessTask = nullptr;
 
