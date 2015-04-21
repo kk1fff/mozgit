@@ -337,14 +337,6 @@ PreallocatedProcessManagerImpl::OnNuwaReady()
   ProcessPriorityManager::SetProcessPriority(mPreallocatedAppProcess,
                                              hal::PROCESS_PRIORITY_MASTER);
   mIsNuwaReady = true;
-  if (Preferences::GetBool("dom.ipc.preallocatedProcessManager.testMode")) {
-    AutoJSContext cx;
-    nsCOMPtr<nsIMessageBroadcaster> ppmm =
-      do_GetService("@mozilla.org/parentprocessmessagemanager;1");
-    mozilla::unused << ppmm->BroadcastAsyncMessage(
-      NS_LITERAL_STRING("TEST-ONLY:nuwa-ready"),
-      JS::NullHandleValue, JS::NullHandleValue, cx, 1);
-  }
   NuwaFork();
 }
 
@@ -424,11 +416,7 @@ namespace mozilla {
 /* static */ void
 PreallocatedProcessManager::AllocateAfterDelay()
 {
-#ifdef MOZ_NUWA_PROCESS
-  GetPPMImpl()->ScheduleDelayedNuwaFork();
-#else
   GetPPMImpl()->AllocateAfterDelay();
-#endif
 }
 
 /* static */ void
@@ -446,44 +434,7 @@ PreallocatedProcessManager::AllocateNow()
 /* static */ already_AddRefed<ContentParent>
 PreallocatedProcessManager::Take()
 {
-#ifdef MOZ_NUWA_PROCESS
-  return GetPPMImpl()->GetSpareProcess();
-#else
   return GetPPMImpl()->Take();
-#endif
 }
-
-#ifdef MOZ_NUWA_PROCESS
-/* static */ void
-PreallocatedProcessManager::PublishSpareProcess(ContentParent* aContent)
-{
-  GetPPMImpl()->PublishSpareProcess(aContent);
-}
-
-/* static */ void
-PreallocatedProcessManager::MaybeForgetSpare(ContentParent* aContent)
-{
-  GetPPMImpl()->MaybeForgetSpare(aContent);
-}
-
-/* static */ void
-PreallocatedProcessManager::OnNuwaReady()
-{
-  GetPPMImpl()->OnNuwaReady();
-}
-
-/* static */ bool
-PreallocatedProcessManager::IsNuwaReady()
-{
-  return GetPPMImpl()->IsNuwaReady();
-}
-
-/*static */ bool
-PreallocatedProcessManager::PreallocatedProcessReady()
-{
-  return GetPPMImpl()->PreallocatedProcessReady();
-}
-
-#endif
 
 } // namespace mozilla

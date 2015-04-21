@@ -18,6 +18,31 @@ namespace dom {
 class ContentParent;
 }
 
+class PreallocatedProcessCreatorCallback
+{
+public:
+  virtual ~PreallocatedProcessCreatorCallback() { }
+  virtual void InitializeDone() = 0;
+  virtual void ProcessReady() = 0;
+  virtual void Error(int aError) = 0;
+};
+
+class PreallocatedProcessCreator
+{
+public:
+  virtual ~PreallocatedProcessCreator() { }
+
+  virtual void
+  CreateProcess() = 0;
+
+  virtual already_AddRefed<ContentParent>
+  GetProcess() = 0;
+
+  // Return if this creator is initialized.
+  virtual bool
+  IsReady() = 0;
+};
+
 /**
  * This class manages a ContentParent that it starts up ahead of any particular
  * need.  You can then call Take() to get this process and use it.  Since we
@@ -79,14 +104,6 @@ public:
    * false to true) before we'll create a new process.
    */
   static already_AddRefed<ContentParent> Take();
-
-#ifdef MOZ_NUWA_PROCESS
-  static void PublishSpareProcess(ContentParent* aContent);
-  static void MaybeForgetSpare(ContentParent* aContent);
-  static bool IsNuwaReady();
-  static void OnNuwaReady();
-  static bool PreallocatedProcessReady();
-#endif
 
 private:
   PreallocatedProcessManager();
